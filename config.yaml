@@ -1,0 +1,80 @@
+# Configuration Visio_Gemini — grille macro multi-agents (MACRO_AGENTS.md)
+
+# ── Chemins projet ──────────────────────────────────────────
+paths:
+  storage_state: secrets/storage_state.json
+  captures: captures/
+  verdicts: verdicts/
+  logs: logs/
+  database: data/visio_gemini.db
+
+# ── Timeframes TradingView (minutes) ───────────────────────
+timeframes:
+  "30m": 30
+  "1h": 60
+  "4h": 240
+  "1D": 1440
+
+# ── Symboles macro ─────────────────────────────────────────
+symbols:
+  TOTAL3ES:
+    tv: CRYPTOCAP:TOTAL3ES
+    role: filtre_macro_principal
+    timeframes: ["1h", "4h", "1D"]
+
+  OTHERS:
+    tv: CRYPTOCAP:OTHERS
+    role: filtre_mid_small_caps
+    timeframes: ["1h", "4h", "1D"]
+
+  USDT.D:
+    tv: CRYPTOCAP:USDT.D
+    role: filtre_sentiment_stables
+    timeframes: ["1h", "4h", "1D"]
+
+  BTCUSDT:
+    tv: BINANCE:BTCUSDT
+    role: correlation_confirmation
+    timeframes: ["30m", "1h", "4h", "1D"]
+
+# ── Agents ↔ layouts TradingView ───────────────────────────
+agents:
+  agent_a:
+    name: Ichimoku + RSI
+    indicators: [ichimoku, rsi]
+    layout:
+      id: VLmoQO22
+      status: ready
+    verdict_scale: [GREEN, YELLOW, RED]
+    enabled: true
+
+  agent_b:
+    name: BB + Volume
+    indicators: [bollinger_bands, volume]
+    layout:
+      id: guJhPkAj
+      status: ready
+    verdict_scale: [GREEN, YELLOW, RED]
+    enabled: true
+
+  agent_c:
+    name: EMA50/200 + MACD
+    indicators: [ema50, ema200, macd]
+    layout:
+      id: bl0W3Xyj
+      status: ready
+    verdict_scale: [GREEN, YELLOW, RED]
+    enabled: true
+
+# ── Exécution courante ─────────────────────────────────────
+run:
+  agents: [agent_a, agent_b, agent_c]
+  symbols: [BTCUSDT]
+  timeframes: ["4h"]
+  priority_timeframes: ["4h", "1D"]
+
+# ── Capture Playwright ─────────────────────────────────────
+capture:
+  viewport: { width: 1920, height: 1080 }
+  wait_ms: 5000
+  headless: true
