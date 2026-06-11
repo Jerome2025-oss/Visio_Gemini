@@ -42,7 +42,7 @@ chmod 700 ~/Visio_Gemini/secrets
 - Layouts personnalisés absents
 - Erreur runtime : « Session TradingView expirée »
 
-→ Ré-exporter `storage_state.json` depuis Windows (voir aussi `Detecte_Pump_Bitunix_P/screenshots/renouvellement_session_tradingview.md`).
+→ Procédure complète : [renouvellement_session_tradingview.md](renouvellement_session_tradingview.md) (cookies Cookie-Editor ou export Playwright).
 
 ## Test capture unitaire
 

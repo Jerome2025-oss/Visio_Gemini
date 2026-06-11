@@ -24,7 +24,7 @@ cp .env.example .env
 # Éditer .env : OPENAI_API_KEY, CHART_VISION_MODEL, PLAYWRIGHT_BROWSERS_PATH
 ```
 
-Session TradingView : voir [docs/TRADINGVIEW_SESSION.md](docs/TRADINGVIEW_SESSION.md).
+Session TradingView : [docs/TRADINGVIEW_SESSION.md](docs/TRADINGVIEW_SESSION.md) · renouvellement cookies : [docs/renouvellement_session_tradingview.md](docs/renouvellement_session_tradingview.md).
 
 ## Usage
 

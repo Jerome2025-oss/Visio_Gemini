@@ -78,3 +78,38 @@ capture:
   viewport: { width: 1920, height: 1080 }
   wait_ms: 5000
   headless: true
+
+# ── Grille macro (référence unique pour modules/ — ÉTAPE 4+) ──
+# src/settings.py continue d'utiliser MACRO_RUN hardcodé jusqu'à migration validée.
+macro:
+  agents: [agent_a, agent_b, agent_c]
+  symbols: [TOTAL3ES, OTHERS, USDT.D, BTCUSDT]
+  timeframes: ["4h", "1D"]
+
+# ── Providers IA (ÉTAPE 3+) ──────────────────────────────────
+providers:
+  strategy: gemini_first          # gemini_first | mammouth_only | gemini_only
+  primary: gemini
+  fallback: mammouth
+  gemini:
+    model: gemini-2.5-flash       # placeholder — validé en ÉTAPE 3 (fallback: gemini-2.0-flash)
+    fallback_model: gemini-2.0-flash
+    api_key_env: GOOGLE_API_KEY
+  mammouth:
+    model_env: CHART_VISION_MODEL
+    base_url_env: OPENAI_BASE_URL
+    api_key_env: OPENAI_API_KEY
+
+# ── Dashboard FastAPI + HTMX (ÉTAPE 6+) ─────────────────────
+dashboard:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8003
+
+# ── Persistance étendue (ÉTAPE 5+) ───────────────────────────
+# Colonnes source/provider/request_id ajoutées en SQLite (nullable).
+# Schéma existant lu par Bitunix_P (:8002/macro) inchangé.
+persistence:
+  store_source: true
+  store_provider: true
+  store_request_id: true

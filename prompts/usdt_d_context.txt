@@ -1,0 +1,8 @@
+=== CONTEXTE USDT.D ===
+USDT.D mesure la **dominance USDT** (pas un actif classique) :
+- Graphique **monte** → dominance ↑ → mauvais pour le crypto (risk-off)
+- Graphique **baisse** → dominance ↓ → bon pour le crypto (risk-on)
+
+**Applique la grille standard de l'étape 3** (comme TOTAL3ES/BTCUSDT) sans modifier les points.
+Le système convertira ensuite ton score en score **sentiment crypto** (inversion automatique).
+
