@@ -1,4 +1,4 @@
-"""Agents vision — prompts et providers IA."""
+"""Agents vision — prompts, parsing et providers IA."""
 
 from modules.agent.prompt_loader import load_prompt
 from modules.agent.providers import (
@@ -7,6 +7,7 @@ from modules.agent.providers import (
     analyze_with_strategy,
     get_provider,
 )
+from modules.agent.verdict_parser import parse_verdict
 
 __all__ = [
     "AnalyzeContext",
@@ -14,4 +15,5 @@ __all__ = [
     "analyze_with_strategy",
     "get_provider",
     "load_prompt",
+    "parse_verdict",
 ]

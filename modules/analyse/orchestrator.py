@@ -17,7 +17,7 @@ from modules.analyse.contracts import AnalysisRequest
 from modules.analyse.results import AnalysisResult
 from modules.capture import capture
 from modules.selection import resolve_symbol_tv
-from src.prompts import parse_verdict
+from modules.agent.verdict_parser import parse_verdict
 
 logger = logging.getLogger("visio_gemini.orchestrator")
 

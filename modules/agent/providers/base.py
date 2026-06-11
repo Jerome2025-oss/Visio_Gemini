@@ -24,7 +24,7 @@ class AnalyzeContext:
 
 @dataclass(frozen=True)
 class VisionResult:
-    """Réponse brute d'un provider — parsing via src/prompts.parse_verdict."""
+    """Réponse brute d'un provider — parsing via modules.agent.verdict_parser."""
 
     text: str
     provider: str

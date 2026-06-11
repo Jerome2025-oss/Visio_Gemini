@@ -1,48 +1,54 @@
-"""
-Provider vision Mammouth — wrapper mince autour de src/analyze.analyze_capture.
-
-Dette technique : importe ``CaptureJob`` depuis ``src/settings.py`` et patche
-temporairement ``src.analyze.get_prompt`` (référence utilisée par ``analyze_capture``)
-pour injecter le prompt reçu en argument, sans modifier src/analyze.py.
-
-``src/main.py`` appelle ``analyze_capture`` directement (``get_prompt`` non patché).
-"""
+"""Provider vision Mammouth — appel OpenAI inline (sans écriture verdict .txt)."""
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+import base64
+import json
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any
 
-import src.analyze as legacy_analyze
+from openai import OpenAI
+
 from modules.agent.providers.base import AnalyzeContext, ProviderError, VisionProvider, VisionResult
-from modules.capture.service import _build_capture_job
+from modules.agent.verdict_parser import extract_confidence, extract_verdict_color, is_valid_verdict
 from modules.config import load_app_config
-from src.analyze import analyze_capture
+
+_CHART_PRICING: dict[str, tuple[float, float]] = {
+    "gemini-3.1-flash-lite-preview": (0.37, 0.43),
+    "gemini-3-flash-preview": (0.3, 1.5),
+    "gemini-3.1-pro-preview": (2.5, 15.0),
+    "mistral-small-2603": (0.15, 0.6),
+    "gpt-5.4-mini": (0.75, 4.5),
+    "gpt-5.4-nano": (0.2, 1.25),
+}
+_EUR_RATE = 0.92
 
 
-@contextmanager
-def _inject_prompt(prompt: str) -> Iterator[None]:
-    """
-    Force analyze_capture à utiliser le prompt fourni par l'appelant.
+def _encode_image(image_path: Path) -> str:
+    with image_path.open("rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
-    ``analyze_capture`` appelle ``get_prompt`` via l'import module-level de
-    ``src.analyze`` — il faut patcher ``src.analyze.get_prompt``, pas ``src.prompts``.
-    """
-    original = legacy_analyze.get_prompt
 
-    def _patched(_agent_id: str, _symbol_key: str, _timeframe_label: str) -> str:
-        return prompt
+def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    inp, out = _CHART_PRICING.get(model, (0.25, 0.4))
+    return (prompt_tokens * inp + completion_tokens * out) / 1_000_000
 
-    legacy_analyze.get_prompt = _patched
-    try:
-        yield
-    finally:
-        legacy_analyze.get_prompt = original
+
+def _estimate_cost_eur(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    return round(_estimate_cost_usd(model, prompt_tokens, completion_tokens) * _EUR_RATE, 6)
+
+
+def _append_cost_log(logs_dir: Path, entry: dict[str, Any]) -> Path:
+    log_path = logs_dir / "chart_analyses.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return log_path
 
 
 class MammouthProvider(VisionProvider):
-    """Délègue à analyze_capture — logique OpenAI/Mammouth inchangée."""
+    """Analyse vision via API Mammouth (format OpenAI)."""
 
     @property
     def name(self) -> str:
@@ -59,42 +65,104 @@ class MammouthProvider(VisionProvider):
             raise ProviderError("Prompt vide", reason="invalid_input")
         if context is None:
             raise ProviderError(
-                "AnalyzeContext requis pour Mammouth (agent_id, symbol_key, layout_id…)",
+                "AnalyzeContext requis pour Mammouth",
                 reason="missing_context",
             )
         if not image_path.is_file():
             raise ProviderError(f"Image introuvable : {image_path}", reason="invalid_input")
 
         app = load_app_config()
-        if not app.providers.openai_api_key:
+        api_key = app.providers.openai_api_key
+        base_url = app.providers.openai_base_url
+        model = app.providers.chart_vision_model
+
+        if not api_key:
             raise ProviderError("OPENAI_API_KEY absente du .env", reason="missing_api_key")
 
-        job = _build_capture_job(
-            symbol_tv=context.symbol_tv,
-            timeframe_label=context.timeframe_label,
-            layout_id=context.layout_id,
-            agent_id=context.agent_id,
-        )
-        verdicts_dir = app.paths.verdicts / context.agent_id
+        print(f"🧠 Modèle vision    : {model}")
+        print(f"🌐 Endpoint         : {base_url}")
+        print(f"📋 Agent            : {context.agent_id}")
 
-        with _inject_prompt(prompt):
-            try:
-                verdict_path, meta = analyze_capture(job, image_path, verdicts_dir)
-            except Exception as exc:
-                raise ProviderError(str(exc), reason="api_error") from exc
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        data_url = f"data:image/png;base64,{_encode_image(image_path)}"
 
-        text = verdict_path.read_text(encoding="utf-8").strip()
+        try:
+            print("📡 Appel API en cours...")
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    }
+                ],
+            )
+        except Exception as exc:
+            raise ProviderError(str(exc), reason="api_error") from exc
+
+        text = (response.choices[0].message.content or "").strip()
         if not text:
             raise ProviderError("Réponse Mammouth vide", reason="empty_response")
+
+        usage = response.usage
+        prompt_tokens = int(usage.prompt_tokens if usage else 0)
+        completion_tokens = int(usage.completion_tokens if usage else 0)
+        cost_usd = round(_estimate_cost_usd(model, prompt_tokens, completion_tokens), 6)
+        cost_eur = _estimate_cost_eur(model, prompt_tokens, completion_tokens)
+
+        verdict_color = extract_verdict_color(text)
+        confidence = extract_confidence(text)
+        verdict_ok = is_valid_verdict(context.agent_id, text)
+
+        meta: dict[str, Any] = {
+            "model": model,
+            "base_url": base_url,
+            "image_path": str(image_path.resolve()),
+            "image_size_kb": round(image_path.stat().st_size / 1024, 1),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+            "cost_usd": cost_usd,
+            "cost_eur": cost_eur,
+            "analyzed_at": datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+
+        log_entry = {
+            "agent_id": context.agent_id,
+            "symbol_key": context.symbol_key,
+            "timeframe": context.timeframe_label,
+            "layout_id": context.layout_id,
+            "verdict_ok": verdict_ok,
+            "verdict_color": verdict_color,
+            "confidence": confidence,
+            "verdict_preview": text[:200].replace("\n", " "),
+            "_meta": meta,
+        }
+        log_path = _append_cost_log(app.paths.logs, log_entry)
+        meta["log_path"] = str(log_path.resolve())
+
+        print(
+            f"💸 Coût estimé      : {cost_eur:.6f} € "
+            f"({prompt_tokens} in + {completion_tokens} out = {prompt_tokens + completion_tokens} tokens)"
+        )
+        if verdict_color:
+            conf_label = f" ({confidence}/10)" if confidence is not None else ""
+            print(f"🚦 Verdict          : {verdict_color}{conf_label}")
 
         return VisionResult(
             text=text,
             provider="mammouth",
-            model=str(meta.get("model", app.providers.chart_vision_model)),
-            prompt_tokens=int(meta.get("prompt_tokens", 0)),
-            completion_tokens=int(meta.get("completion_tokens", 0)),
-            cost_usd=float(meta.get("cost_usd", 0.0)),
-            cost_eur=float(meta.get("cost_eur", 0.0)),
-            verdict_path=verdict_path,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost_usd,
+            cost_eur=cost_eur,
+            verdict_path=None,
             raw_meta=meta,
         )
