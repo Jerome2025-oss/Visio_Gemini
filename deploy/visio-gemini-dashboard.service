@@ -1,0 +1,17 @@
+[Unit]
+Description=Visio Gemini — Dashboard FastAPI + HTMX (port 8004)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Visio_Gemini
+EnvironmentFile=/root/Visio_Gemini/.env
+ExecStart=/root/Visio_Gemini/.venv/bin/python -m modules.dashboard.app
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
