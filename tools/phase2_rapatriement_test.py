@@ -13,9 +13,7 @@ sys.path.insert(0, str(ROOT))
 from modules.analyse.orchestrator import run_batch
 from modules.selection.builders import build_from_run_section, build_manual_requests
 
-# Comparaison parse_verdict legacy vs modules
-from modules.agent.verdict_parser import parse_verdict as parse_new
-from src.prompts import parse_verdict as parse_legacy
+from modules.agent.verdict_parser import parse_verdict
 
 SAMPLE_USDT_VERDICT = """
 **Indice / Crypto :** USDT.D
@@ -26,18 +24,15 @@ SAMPLE_USDT_VERDICT = """
 """
 
 
-def test_usdt_parsing_parity() -> None:
+def test_usdt_parsing() -> None:
     print("=" * 60)
-    print("TEST USDT.D — parité parse_verdict legacy vs modules")
+    print("TEST USDT.D — inversion parse_verdict (modules)")
     print("=" * 60)
-    legacy = parse_legacy("agent_a", SAMPLE_USDT_VERDICT, "USDT.D")
-    new = parse_new("agent_a", SAMPLE_USDT_VERDICT, "USDT.D")
-    print("Legacy:", json.dumps(legacy, ensure_ascii=False, indent=2))
-    print("Modules:", json.dumps(new, ensure_ascii=False, indent=2))
-    assert legacy == new, f"DIVERGENCE: {legacy} != {new}"
-    assert new["confiance"] == 3, f"Score crypto attendu 3 (10-7), got {new['confiance']}"
-    assert new["verdict"] == "RED"
-    print("✅ USDT.D inversion identique\n")
+    parsed = parse_verdict("agent_a", SAMPLE_USDT_VERDICT, "USDT.D")
+    print(json.dumps(parsed, ensure_ascii=False, indent=2))
+    assert parsed["confiance"] == 3, f"Score crypto attendu 3 (10-7), got {parsed['confiance']}"
+    assert parsed["verdict"] == "RED"
+    print("✅ USDT.D inversion OK\n")
 
 
 def test_run_batch_btc() -> list:
@@ -87,7 +82,7 @@ def test_usdt_live() -> None:
 
 
 if __name__ == "__main__":
-    test_usdt_parsing_parity()
+    test_usdt_parsing()
     btc_results = test_run_batch_btc()
     test_usdt_live()
     failed = [r for r in btc_results if not r.success]
