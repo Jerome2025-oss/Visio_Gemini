@@ -85,15 +85,8 @@ macro:
   symbols: [TOTAL3ES, OTHERS, USDT.D, BTCUSDT]
   timeframes: ["4h", "1D"]
 
-# ── Providers IA (ÉTAPE 3+) ──────────────────────────────────
+# ── Provider vision (Mammouth uniquement) ─────────────────────
 providers:
-  strategy: gemini_first          # gemini_first | mammouth_only | gemini_only
-  primary: gemini
-  fallback: mammouth
-  gemini:
-    model: gemini-2.5-flash       # placeholder — validé en ÉTAPE 3 (fallback: gemini-2.0-flash)
-    fallback_model: gemini-2.0-flash
-    api_key_env: GOOGLE_API_KEY
   mammouth:
     model_env: CHART_VISION_MODEL
     base_url_env: OPENAI_BASE_URL

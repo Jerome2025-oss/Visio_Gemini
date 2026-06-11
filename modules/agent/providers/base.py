@@ -7,10 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Seuil timeout API Gemini (secondes) — déclenche fallback → Mammouth
-GEMINI_API_TIMEOUT_SECONDS = 90
-
-
 @dataclass(frozen=True)
 class AnalyzeContext:
     """Contexte métier requis par Mammouth (wrapper analyze_capture)."""
@@ -38,7 +34,7 @@ class VisionResult:
 
 
 class ProviderError(RuntimeError):
-    """Erreur provider récupérable (déclenche fallback si strategy=gemini_first)."""
+    """Erreur provider vision (API Mammouth)."""
 
     def __init__(self, message: str, *, reason: str = "unknown") -> None:
         super().__init__(message)
@@ -46,12 +42,12 @@ class ProviderError(RuntimeError):
 
 
 class VisionProvider(ABC):
-    """Interface commune Gemini et Mammouth."""
+    """Interface provider vision."""
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Identifiant court : ``gemini`` ou ``mammouth``."""
+        """Identifiant court du provider (``mammouth``)."""
 
     @abstractmethod
     def analyze(

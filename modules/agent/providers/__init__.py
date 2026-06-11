@@ -1,7 +1,6 @@
-"""Providers vision Gemini (principal) et Mammouth (backup)."""
+"""Provider vision Mammouth (API OpenAI-compatible)."""
 
 from modules.agent.providers.base import (
-    GEMINI_API_TIMEOUT_SECONDS,
     AnalyzeContext,
     ProviderError,
     VisionProvider,
@@ -10,7 +9,6 @@ from modules.agent.providers.base import (
 from modules.agent.providers.registry import analyze_with_strategy, get_provider
 
 __all__ = [
-    "GEMINI_API_TIMEOUT_SECONDS",
     "AnalyzeContext",
     "ProviderError",
     "VisionProvider",

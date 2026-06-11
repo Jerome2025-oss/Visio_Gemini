@@ -15,7 +15,6 @@ from modules.config.models import (
     AppConfig,
     CaptureConfig,
     DashboardConfig,
-    GeminiProviderConfig,
     MacroConfig,
     MammouthProviderConfig,
     PathsConfig,
@@ -134,33 +133,20 @@ def _parse_macro(raw: dict[str, Any] | None) -> MacroConfig:
 
 def _parse_providers(raw: dict[str, Any] | None) -> ProvidersConfig:
     data = raw or {}
-    gemini_raw = data.get("gemini") or {}
     mammouth_raw = data.get("mammouth") or {}
-    if not isinstance(gemini_raw, dict):
-        gemini_raw = {}
     if not isinstance(mammouth_raw, dict):
         mammouth_raw = {}
 
-    gemini_key_env = str(gemini_raw.get("api_key_env", "GOOGLE_API_KEY"))
     mammouth_key_env = str(mammouth_raw.get("api_key_env", "OPENAI_API_KEY"))
     mammouth_model_env = str(mammouth_raw.get("model_env", "CHART_VISION_MODEL"))
     mammouth_base_env = str(mammouth_raw.get("base_url_env", "OPENAI_BASE_URL"))
 
     return ProvidersConfig(
-        strategy=str(data.get("strategy", "gemini_first")),
-        primary=str(data.get("primary", "gemini")),
-        fallback=str(data.get("fallback", "mammouth")),
-        gemini=GeminiProviderConfig(
-            model=str(gemini_raw.get("model", "gemini-2.5-flash")),
-            fallback_model=str(gemini_raw.get("fallback_model", "gemini-2.0-flash")),
-            api_key_env=gemini_key_env,
-        ),
         mammouth=MammouthProviderConfig(
             model_env=mammouth_model_env,
             base_url_env=mammouth_base_env,
             api_key_env=mammouth_key_env,
         ),
-        google_api_key=_env(gemini_key_env, ""),
         openai_api_key=_env(mammouth_key_env, ""),
         openai_base_url=_env(mammouth_base_env, "https://api.mammouth.ai/v1"),
         chart_vision_model=_env(mammouth_model_env, "gemini-3.1-flash-lite-preview"),

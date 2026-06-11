@@ -1,6 +1,6 @@
 # Visio_Gemini
 
-Bot macro **TradingView + Gemini Vision (Mammouth)** : capture multi-layouts, analyse multi-agents, résultats en mémoire.
+Bot macro **TradingView + vision Mammouth** : capture multi-layouts, analyse multi-agents, résultats en mémoire.
 
 Dashboard FastAPI + HTMX sur le port **8004** (ÉTAPE 6) — affichage des derniers `AnalysisResult` sans SQLite.
 
@@ -8,7 +8,7 @@ Dashboard FastAPI + HTMX sur le port **8004** (ÉTAPE 6) — affichage des derni
 
 - Python 3.12+, venv local
 - Playwright (capture TradingView headless)
-- Google Gemini (primaire) + API Mammouth / OpenAI SDK (fallback vision)
+- API Mammouth (OpenAI SDK) — modèle vision via `CHART_VISION_MODEL`
 - Résultats pipeline : `AnalysisResult` en mémoire
 
 ## Installation (VPS)
@@ -21,7 +21,7 @@ pip install -r requirements.txt
 playwright install chromium
 
 cp .env.example .env
-# Éditer .env : GOOGLE_API_KEY, OPENAI_API_KEY, CHART_VISION_MODEL, PLAYWRIGHT_BROWSERS_PATH
+# Éditer .env : OPENAI_API_KEY, CHART_VISION_MODEL, PLAYWRIGHT_BROWSERS_PATH
 ```
 
 Session TradingView : [docs/TRADINGVIEW_SESSION.md](docs/TRADINGVIEW_SESSION.md) · renouvellement cookies : [docs/renouvellement_session_tradingview.md](docs/renouvellement_session_tradingview.md).
@@ -76,7 +76,7 @@ Visio_Gemini/
 ├── MACRO_AGENTS.md      # Grilles /10, consensus, USDT.D
 ├── modules/
 │   ├── capture/         # Playwright TradingView
-│   ├── agent/           # Providers Gemini/Mammouth + parsing
+│   ├── agent/           # Provider Mammouth + parsing
 │   ├── analyse/         # Orchestrateur run_batch()
 │   ├── selection/       # Résolution symboles / macro
 │   └── config/          # Loader config.yaml

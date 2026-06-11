@@ -5,7 +5,7 @@
 - VPS Linux, accès SSH
 - Python 3.12+, venv : `~/Visio_Gemini/venv/` ou `.venv/`
 - Playwright Chromium : `~/.cache/ms-playwright` (voir `PLAYWRIGHT_BROWSERS_PATH` dans `.env`)
-- API vision : Gemini (primaire) + Mammouth fallback (`OPENAI_BASE_URL`, `CHART_VISION_MODEL`)
+- API vision : Mammouth uniquement (`OPENAI_BASE_URL`, `CHART_VISION_MODEL`)
 - Config : `config.yaml` + `.env`
 - Dashboard : FastAPI + HTMX sur port **8004** (8003 = bot trading)
 
@@ -61,7 +61,7 @@ run_batch(build_macro_requests())
 | `modules/analyse/orchestrator.py` | Orchestration capture → vision → parse |
 | `MACRO_AGENTS.md` | Spec notation, consensus, exemples dashboard |
 | `secrets/storage_state.json` | Session TradingView (export Windows) |
-| `.env` | Clés API Gemini/Mammouth, modèle vision |
+| `.env` | Clé API Mammouth, modèle vision |
 
 ## 7. RÈGLES DE COLLABORATION
 

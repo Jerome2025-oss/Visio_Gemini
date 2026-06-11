@@ -67,13 +67,6 @@ class MacroConfig:
 
 
 @dataclass(frozen=True)
-class GeminiProviderConfig:
-    model: str
-    fallback_model: str
-    api_key_env: str
-
-
-@dataclass(frozen=True)
 class MammouthProviderConfig:
     model_env: str
     base_url_env: str
@@ -82,12 +75,7 @@ class MammouthProviderConfig:
 
 @dataclass(frozen=True)
 class ProvidersConfig:
-    strategy: str
-    primary: str
-    fallback: str
-    gemini: GeminiProviderConfig
     mammouth: MammouthProviderConfig
-    google_api_key: str
     openai_api_key: str
     openai_base_url: str
     chart_vision_model: str
