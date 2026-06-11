@@ -8,6 +8,8 @@ paths:
 
 # ── Timeframes TradingView (minutes) ───────────────────────
 timeframes:
+  "5m": 5
+  "15m": 15
   "30m": 30
   "1h": 60
   "4h": 240
@@ -18,22 +20,22 @@ symbols:
   TOTAL3ES:
     tv: CRYPTOCAP:TOTAL3ES
     role: filtre_macro_principal
-    timeframes: ["1h", "4h", "1D"]
+    timeframes: ["5m", "15m", "30m", "1h", "4h", "1D"]
 
   OTHERS:
     tv: CRYPTOCAP:OTHERS
     role: filtre_mid_small_caps
-    timeframes: ["1h", "4h", "1D"]
+    timeframes: ["5m", "15m", "30m", "1h", "4h", "1D"]
 
   USDT.D:
     tv: CRYPTOCAP:USDT.D
     role: filtre_sentiment_stables
-    timeframes: ["1h", "4h", "1D"]
+    timeframes: ["5m", "15m", "30m", "1h", "4h", "1D"]
 
   BTCUSDT:
     tv: BINANCE:BTCUSDT
     role: correlation_confirmation
-    timeframes: ["30m", "1h", "4h", "1D"]
+    timeframes: ["5m", "15m", "30m", "1h", "4h", "1D"]
 
 # ── Agents ↔ layouts TradingView ───────────────────────────
 agents:

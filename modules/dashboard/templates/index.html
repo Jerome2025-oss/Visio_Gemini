@@ -37,7 +37,7 @@
             <label for="timeframe">Timeframe</label>
             <select id="timeframe" name="timeframe">
               {% for tf in timeframes %}
-              <option value="{{ tf }}"{% if tf == "4h" %} selected{% endif %}>{{ tf }}</option>
+              <option value="{{ tf.value }}"{% if tf.key == "1h" %} selected{% endif %}>{{ tf.label }}</option>
               {% endfor %}
             </select>
           </div>

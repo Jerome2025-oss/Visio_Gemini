@@ -21,11 +21,49 @@ router = APIRouter()
 # « Sync API inside the asyncio loop ». Ne pas convertir en async sans migrer la capture.
 
 
+_TIMEFRAME_ALIASES: dict[str, str] = {
+    "5mn": "5m",
+    "5m": "5m",
+    "15mn": "15m",
+    "15m": "15m",
+    "30mn": "30m",
+    "30m": "30m",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1D",
+    "1j": "1D",
+    "1D": "1D",
+}
+
+_DASHBOARD_TF_ORDER: tuple[str, ...] = ("5m", "15m", "30m", "1h", "4h", "1D")
+
+_DASHBOARD_TF_LABELS: dict[str, str] = {
+    "5m": "5mn",
+    "15m": "15mn",
+    "30m": "30mn",
+    "1h": "1h",
+    "4h": "4h",
+    "1D": "1j",
+}
+
+
 def _normalize_timeframe(timeframe: str) -> str:
-    label = timeframe.strip()
-    if label.lower() == "1d":
-        return "1D"
-    return label
+    key = timeframe.strip().lower().replace(" ", "")
+    if key in _TIMEFRAME_ALIASES:
+        return _TIMEFRAME_ALIASES[key]
+    return timeframe.strip()
+
+
+def _dashboard_timeframe_options() -> list[dict[str, str]]:
+    """Options du select dashboard (libellés FR → clés config.yaml)."""
+    app_config = load_app_config()
+    options: list[dict[str, str]] = []
+    for key in _DASHBOARD_TF_ORDER:
+        if key not in app_config.timeframes:
+            continue
+        label = _DASHBOARD_TF_LABELS.get(key, key)
+        options.append({"key": key, "value": label, "label": label})
+    return options
 
 
 def _results_context(
@@ -71,7 +109,7 @@ def index(request: Request) -> HTMLResponse:
             "run_error": None,
             "captures_dir": app_config.paths.captures,
             "agents_config": app_config.agents,
-            "timeframes": ["15m", "1h", "4h", "1d"],
+            "timeframes": _dashboard_timeframe_options(),
         },
     )
 
