@@ -1,0 +1,78 @@
+{% if run_error %}
+<div class="error">{{ run_error }}</div>
+{% endif %}
+
+{% if not results and not run_error %}
+<div class="empty">Lance une analyse pour afficher les verdicts ici.</div>
+{% elif results %}
+<table>
+  <thead>
+    <tr>
+      <th>Agent</th>
+      <th>Symbole</th>
+      <th>TF</th>
+      <th>Verdict</th>
+      <th>Confiance</th>
+      <th>Provider</th>
+      <th>Capture</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in results %}
+    <tr>
+      <td>{{ r.request.agent_id }}</td>
+      <td>{{ r.request.token }}</td>
+      <td>{{ r.request.timeframe }}</td>
+      <td>
+        {% if r.success and r.parsed and r.parsed.verdict %}
+          {% set v = r.parsed.verdict %}
+          <span class="badge badge-{{ v|lower }}">{{ v }}</span>
+        {% elif r.success %}
+          <span class="badge badge-muted">—</span>
+        {% else %}
+          <span class="badge badge-muted">FAIL</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if r.success and r.parsed and r.parsed.confiance is not none %}
+          {{ r.parsed.confiance }}/10
+        {% elif not r.success %}
+          <span class="job-fail" title="{{ r.error }}">erreur</span>
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td>
+        {% if r.vision %}
+          {{ r.vision.provider }}<br>
+          <small style="color:var(--muted)">{{ r.vision.model }}</small>
+        {% elif r.metadata and r.metadata.provider %}
+          {{ r.metadata.provider }}
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td>
+        {% if r.png_path %}
+          {% set url = r.png_path | png_url %}
+          {% if url %}
+          <a href="{{ url }}" target="_blank" rel="noopener">
+            <img class="thumb" src="{{ url }}" alt="capture {{ r.request.token }}">
+          </a>
+          {% else %}
+          —
+          {% endif %}
+        {% else %}
+          —
+        {% endif %}
+      </td>
+    </tr>
+    {% if not r.success and r.error %}
+    <tr>
+      <td colspan="7" class="job-fail">{{ r.error }}</td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

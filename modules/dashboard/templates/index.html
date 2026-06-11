@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visio Gemini — Dashboard</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Visio Gemini</h1>
+      <p>Analyse macro TradingView · résultats en mémoire · port 8003</p>
+    </header>
+
+    <section class="panel">
+      <form
+        hx-post="/run"
+        hx-target="#results"
+        hx-swap="innerHTML"
+        hx-indicator="#run-spinner"
+      >
+        <div class="form-grid">
+          <div>
+            <label for="symbol">Symbole</label>
+            <input
+              type="text"
+              id="symbol"
+              name="symbol"
+              value="BTCUSDT"
+              placeholder="BTCUSDT"
+              required
+            >
+          </div>
+          <div>
+            <label for="timeframe">Timeframe</label>
+            <select id="timeframe" name="timeframe">
+              {% for tf in timeframes %}
+              <option value="{{ tf }}"{% if tf == "4h" %} selected{% endif %}>{{ tf }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Agents</label>
+            <div class="agents">
+              {% for agent_id, agent in agents_config.items() %}
+              <label>
+                <input type="checkbox" name="agents" value="{{ agent_id }}" checked>
+                {{ agent_id }} — {{ agent.name }}
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+          <div>
+            <button type="submit">Lancer</button>
+            <span id="run-spinner" class="htmx-indicator" style="margin-left:0.5rem;color:var(--muted);font-size:0.85rem;">Analyse en cours…</span>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="results-head">
+        <h2>Résultats</h2>
+        <button
+          type="button"
+          hx-get="/results"
+          hx-target="#results"
+          hx-swap="innerHTML"
+        >Rafraîchir</button>
+      </div>
+      <div id="results">
+        {% include "_results.html" %}
+      </div>
+    </section>
+  </div>
+</body>
+</html>
