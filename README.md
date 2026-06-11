@@ -2,7 +2,7 @@
 
 Bot macro **TradingView + Gemini Vision (Mammouth)** : capture multi-layouts, analyse multi-agents, résultats en mémoire.
 
-Dashboard FastAPI + HTMX sur le port **8003** (ÉTAPE 6) — affichage des derniers `AnalysisResult` sans SQLite.
+Dashboard FastAPI + HTMX sur le port **8004** (ÉTAPE 6) — affichage des derniers `AnalysisResult` sans SQLite.
 
 ## Stack
 
@@ -58,14 +58,14 @@ Documentation complète : [MACRO_AGENTS.md](MACRO_AGENTS.md).
 
 | Élément | Politique |
 |---------|-----------|
-| **Verdicts** | En mémoire (`AnalysisResult`) — dashboard `:8003` |
+| **Verdicts** | En mémoire (`AnalysisResult`) — dashboard `:8004` |
 | **PNG** | `captures/{agent_id}/` — conservés localement |
 | **Logs coût** | `logs/chart_analyses.jsonl` (optionnel) |
 | **`.env` / `secrets/`** | Jamais commités |
 
 ## Dashboard
 
-- **Port 8003** — FastAPI + HTMX (ÉTAPE 6, en cours)
+- **Port 8004** — FastAPI + HTMX (8003 = bot trading sur ce VPS)
 - Affiche les derniers verdicts par (symbole, TF, agent) depuis la mémoire du processus
 
 ## Structure

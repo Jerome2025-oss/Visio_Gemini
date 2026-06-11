@@ -7,7 +7,7 @@
 - Playwright Chromium : `~/.cache/ms-playwright` (voir `PLAYWRIGHT_BROWSERS_PATH` dans `.env`)
 - API vision : Gemini (primaire) + Mammouth fallback (`OPENAI_BASE_URL`, `CHART_VISION_MODEL`)
 - Config : `config.yaml` + `.env`
-- Dashboard : FastAPI + HTMX sur port **8003** (résultats en mémoire)
+- Dashboard : FastAPI + HTMX sur port **8004** (8003 = bot trading)
 
 ## 2. RÔLE DU PROJET
 
@@ -34,7 +34,7 @@ Le LLM applique la grille standard ; Python convertit : `score_crypto = 10 - sco
 
 - **Verdicts** : `AnalysisResult` en mémoire — pas de SQLite, pas d'archives `.txt`
 - **PNG** : `captures/{agent_id}/` — conservés localement
-- **Dashboard :8003** : affiche les derniers verdicts du processus en cours
+- **Dashboard :8004** : affiche les derniers verdicts du processus en cours
 
 ## 5. COMMANDES COURANTES
 

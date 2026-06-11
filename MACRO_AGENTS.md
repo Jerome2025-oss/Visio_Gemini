@@ -187,7 +187,7 @@ Légende des colonnes : **Score** = points grille `/10` (force haussière), **pa
 | Parsing score/verdict| `modules/agent/verdict_parser.py` → `parse_verdict()` |
 | Résultats pipeline   | `AnalysisResult` en mémoire (`modules/analyse/`)     |
 | Lancement macro      | `run_batch(build_macro_requests())` (24 jobs)        |
-| Dashboard web        | FastAPI + HTMX port **8003** (mémoire, ÉTAPE 6)      |
+| Dashboard web        | FastAPI + HTMX port **8004** (mémoire, ÉTAPE 6)      |
 
 **État actuel** : les **3 agents** (A, B, C) sont actifs sur la grille 4H + 1D × 4 symboles via `modules/`.
 

@@ -172,7 +172,7 @@ def _parse_dashboard(raw: dict[str, Any] | None) -> DashboardConfig:
     return DashboardConfig(
         enabled=bool(data.get("enabled", True)),
         host=str(data.get("host", "0.0.0.0")),
-        port=int(data.get("port", 8003)),
+        port=int(data.get("port", 8004)),
     )
 
 

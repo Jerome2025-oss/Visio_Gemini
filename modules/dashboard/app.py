@@ -1,4 +1,4 @@
-"""Point d'entrée FastAPI — dashboard Visio Gemini (:8003)."""
+"""Point d'entrée FastAPI — dashboard Visio Gemini (:8004)."""
 
 from __future__ import annotations
 
