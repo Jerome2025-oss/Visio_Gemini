@@ -4,9 +4,7 @@
 paths:
   storage_state: secrets/storage_state.json
   captures: captures/
-  verdicts: verdicts/
   logs: logs/
-  database: data/visio_gemini.db
 
 # ── Timeframes TradingView (minutes) ───────────────────────
 timeframes:
@@ -79,8 +77,7 @@ capture:
   wait_ms: 5000
   headless: true
 
-# ── Grille macro (référence unique pour modules/ — ÉTAPE 4+) ──
-# src/settings.py continue d'utiliser MACRO_RUN hardcodé jusqu'à migration validée.
+# ── Grille macro (référence unique pour modules/) ──
 macro:
   agents: [agent_a, agent_b, agent_c]
   symbols: [TOTAL3ES, OTHERS, USDT.D, BTCUSDT]
@@ -105,11 +102,3 @@ dashboard:
   enabled: true
   host: "0.0.0.0"
   port: 8003
-
-# ── Persistance étendue (ÉTAPE 5+) ───────────────────────────
-# Colonnes source/provider/request_id ajoutées en SQLite (nullable).
-# Schéma existant lu par Bitunix_P (:8002/macro) inchangé.
-persistence:
-  store_source: true
-  store_provider: true
-  store_request_id: true

@@ -14,7 +14,7 @@ Référence pour l’analyse macro du bot : symboles, timeframes, indicateurs, a
 | **Verdict** | Choisi librement par le LLM | **Dérivé obligatoirement du score** |
 | **Interprétation** | Confiance subjective | Score **bas** → signal **rouge** ; score **élevé** → signal **vert** |
 
-Chaque agent retourne **Verdict + Score /10** selon la grille de notation haussière définie dans `src/prompts.py`.  
+Chaque agent retourne **Verdict + Score /10** selon la grille de notation haussière définie dans `prompts/agent_*.txt`.  
 Le verdict affiché est recalculé côté Python si le modèle diverge :
 
 | Score /10 | Verdict |
@@ -38,7 +38,7 @@ Exemple : `RED 3/10` + `RED 2/10` + `RED 4/10` → consensus **`RED 3/10`**.
 
 ### USDT.D (risk-on / risk-off)
 
-Pour **USDT.D** uniquement, une **règle spéciale** est injectée dans les prompts des 3 agents (`src/prompts.py`) :
+Pour **USDT.D** uniquement, une **règle spéciale** est injectée dans les prompts des 3 agents (`prompts/usdt_d_context.txt`) :
 
 - Graphique **monte** → dominance ↑ → **note basse** (conditions haussières = 0 pt)
 - Graphique **baisse** → dominance ↓ → **note élevée** (conditions baissières = points)
@@ -148,7 +148,7 @@ Légende des colonnes : **Score** = points grille `/10` (force haussière), **pa
 | USDT.D   | YELLOW 5/10     | GREEN 8/10      | RED 2/10        | YELLOW    |
 | BTCUSDT  | RED 3/10        | RED 4/10        | RED 2/10        | RED       |
 
-*(Exemple illustratif 4H ; les valeurs réelles proviennent du dernier run SQLite.)*
+*(Exemple illustratif 4H ; les valeurs réelles proviennent du dernier `run_batch()` en mémoire.)*
 
 ---
 
@@ -181,23 +181,21 @@ Légende des colonnes : **Score** = points grille `/10` (force haussière), **pa
 
 | Élément              | Fichier / config                                     |
 |----------------------|------------------------------------------------------|
-| Prompts actifs       | `src/prompts.py` — grilles /10 + mapping verdict     |
-| Prompts archivés     | `prompts_legacy.md` — version sans grille (obsolète) |
-| Capture TradingView  | `src/capture.py` — layouts par agent (`config.yaml`) |
-| Config symboles / TF   | `config.yaml`                                        |
-| Parsing score/verdict| `src/prompts.py` → `parse_verdict()`, `verdict_from_score()` |
-| Verdicts bruts       | `verdicts/agent_*/`                                  |
-| Stockage SQLite      | `data/visio_gemini.db` — colonne `confiance` = score /10 |
-| Lancement macro      | `python -m src.main --macro` (24 jobs)               |
-| Dashboard web        | Bitunix_P → `/macro` (lecture SQLite + tooltips)     |
+| Prompts actifs       | `prompts/agent_*.txt` + `prompts/usdt_d_context.txt` |
+| Capture TradingView  | `modules/capture/tv_capture.py` — layouts par agent  |
+| Config symboles / TF | `config.yaml`                                        |
+| Parsing score/verdict| `modules/agent/verdict_parser.py` → `parse_verdict()` |
+| Résultats pipeline   | `AnalysisResult` en mémoire (`modules/analyse/`)     |
+| Lancement macro      | `run_batch(build_macro_requests())` (24 jobs)        |
+| Dashboard web        | FastAPI + HTMX port **8003** (mémoire, ÉTAPE 6)      |
 
-**État actuel** : les **3 agents** (A, B, C) sont actifs sur la grille 4H + 1D × 4 symboles via `--macro`.
+**État actuel** : les **3 agents** (A, B, C) sont actifs sur la grille 4H + 1D × 4 symboles via `modules/`.
 
 ---
 
 ## 8. Grilles de notation (référence rapide)
 
-Détail complet dans `src/prompts.py`. Résumé :
+Détail complet dans `prompts/agent_*.txt`. Résumé :
 
 ### Agent A — Ichimoku + RSI (max 10 pts)
 

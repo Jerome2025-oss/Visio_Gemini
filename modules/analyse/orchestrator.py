@@ -2,7 +2,7 @@
 Orchestrateur pipeline : AnalysisRequest → capture → vision → parse_verdict.
 
 Séquentiel, jobs isolés (un échec n'arrête pas le batch).
-Pas d'écriture SQLite (ÉTAPE 5).
+Résultats en mémoire (AnalysisResult) — pas de persistance disque.
 """
 
 from __future__ import annotations

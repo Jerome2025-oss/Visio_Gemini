@@ -1,15 +1,15 @@
 # Visio_Gemini
 
-Bot macro **TradingView + Gemini Vision (Mammouth)** : capture multi-layouts, analyse multi-agents, stockage SQLite.
+Bot macro **TradingView + Gemini Vision (Mammouth)** : capture multi-layouts, analyse multi-agents, résultats en mémoire.
 
-Projet compagnon de [Detecte_Pump_Bitunix_P](https://github.com/Jerome2025-oss/detecte_Pump_Bitunix_P) — le dashboard `/macro` (port 8002) lit `data/visio_gemini.db`.
+Dashboard FastAPI + HTMX sur le port **8003** (ÉTAPE 6) — affichage des derniers `AnalysisResult` sans SQLite.
 
 ## Stack
 
 - Python 3.12+, venv local
 - Playwright (capture TradingView headless)
-- OpenAI SDK → API Mammouth (Gemini vision)
-- SQLite (`data/visio_gemini.db`)
+- Google Gemini (primaire) + API Mammouth / OpenAI SDK (fallback vision)
+- Résultats pipeline : `AnalysisResult` en mémoire
 
 ## Installation (VPS)
 
@@ -21,7 +21,7 @@ pip install -r requirements.txt
 playwright install chromium
 
 cp .env.example .env
-# Éditer .env : OPENAI_API_KEY, CHART_VISION_MODEL, PLAYWRIGHT_BROWSERS_PATH
+# Éditer .env : GOOGLE_API_KEY, OPENAI_API_KEY, CHART_VISION_MODEL, PLAYWRIGHT_BROWSERS_PATH
 ```
 
 Session TradingView : [docs/TRADINGVIEW_SESSION.md](docs/TRADINGVIEW_SESSION.md) · renouvellement cookies : [docs/renouvellement_session_tradingview.md](docs/renouvellement_session_tradingview.md).
@@ -31,14 +31,19 @@ Session TradingView : [docs/TRADINGVIEW_SESSION.md](docs/TRADINGVIEW_SESSION.md)
 ```bash
 cd ~/Visio_Gemini && source venv/bin/activate
 
-# Test rapide (section run de config.yaml)
-./venv/bin/python -m src.main
+# Test pipeline (section run de config.yaml)
+.venv/bin/python3 -c "
+from modules.analyse import run_batch
+from modules.selection import build_from_run_section
+print(run_batch(build_from_run_section()))
+"
 
 # Grille macro complète : 4 symboles × 2 TF × 3 agents = 24 jobs
-./venv/bin/python -m src.main --macro
-
-# Estimation coût Mammouth
-./venv/bin/python -m src.main --budget
+.venv/bin/python3 -c "
+from modules.analyse import run_batch
+from modules.selection import build_macro_requests
+print(run_batch(build_macro_requests()))
+"
 ```
 
 ## Grille macro
@@ -53,38 +58,31 @@ Documentation complète : [MACRO_AGENTS.md](MACRO_AGENTS.md).
 
 | Élément | Politique |
 |---------|-----------|
-| **SQLite** | Append-only — jamais purgé sauf demande explicite |
-| **PNG** | Purge auto des orphelins après chaque run (non référencés en base) |
+| **Verdicts** | En mémoire (`AnalysisResult`) — dashboard `:8003` |
+| **PNG** | `captures/{agent_id}/` — conservés localement |
+| **Logs coût** | `logs/chart_analyses.jsonl` (optionnel) |
 | **`.env` / `secrets/`** | Jamais commités |
 
-## Intégration Bitunix_P
+## Dashboard
 
-Dans `Detecte_Pump_Bitunix_P/config.yaml` :
-
-```yaml
-visio_gemini:
-  database_path: /root/Visio_Gemini/data/visio_gemini.db
-  reports_dir: /root/Visio_Gemini/reports
-```
-
-Dashboard : `http://VPS:8002/macro`
+- **Port 8003** — FastAPI + HTMX (ÉTAPE 6, en cours)
+- Affiche les derniers verdicts par (symbole, TF, agent) depuis la mémoire du processus
 
 ## Structure
 
 ```
 Visio_Gemini/
-├── config.yaml          # Symboles, agents, layouts TV
+├── config.yaml          # Symboles, agents, layouts TV, providers
 ├── MACRO_AGENTS.md      # Grilles /10, consensus, USDT.D
-├── src/
-│   ├── main.py          # Point d'entrée --macro
-│   ├── capture.py       # Playwright TradingView
-│   ├── analyze.py       # API vision Mammouth
-│   ├── prompts.py       # Grilles agents A/B/C
-│   ├── database.py      # SQLite
-│   └── capture_cleanup.py
+├── modules/
+│   ├── capture/         # Playwright TradingView
+│   ├── agent/           # Providers Gemini/Mammouth + parsing
+│   ├── analyse/         # Orchestrateur run_batch()
+│   ├── selection/       # Résolution symboles / macro
+│   └── config/          # Loader config.yaml
+├── prompts/             # Prompts agents A/B/C + contexte USDT.D
 ├── captures/            # PNG (gitignored)
-├── verdicts/            # Texte brut IA (gitignored)
-├── data/                # visio_gemini.db (gitignored)
+├── logs/                # JSONL coûts API (gitignored)
 └── secrets/             # storage_state.json (gitignored)
 ```
 
@@ -92,4 +90,4 @@ Visio_Gemini/
 
 - `.env`
 - `secrets/storage_state.json`
-- `data/*.db`, `captures/`, `logs/`, `verdicts/`
+- `captures/`, `logs/`

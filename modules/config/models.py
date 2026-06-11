@@ -11,9 +11,7 @@ from typing import Any
 class PathsConfig:
     storage_state: Path
     captures: Path
-    verdicts: Path
     logs: Path
-    database: Path
 
 
 @dataclass(frozen=True)
@@ -103,13 +101,6 @@ class DashboardConfig:
 
 
 @dataclass(frozen=True)
-class PersistenceConfig:
-    store_source: bool
-    store_provider: bool
-    store_request_id: bool
-
-
-@dataclass(frozen=True)
 class AppConfig:
     """Configuration complète projet (YAML + variables d'environnement résolues)."""
 
@@ -123,7 +114,6 @@ class AppConfig:
     macro: MacroConfig
     providers: ProvidersConfig
     dashboard: DashboardConfig
-    persistence: PersistenceConfig
     openai_model: str
     playwright_browsers_path: str
 

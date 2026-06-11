@@ -19,7 +19,6 @@ from modules.config.models import (
     MacroConfig,
     MammouthProviderConfig,
     PathsConfig,
-    PersistenceConfig,
     ProvidersConfig,
     RunConfig,
     SymbolConfig,
@@ -62,9 +61,7 @@ def _parse_paths(root: Path, raw: dict[str, Any]) -> PathsConfig:
             root, str(raw.get("storage_state", "secrets/storage_state.json"))
         ),
         captures=_resolve_path(root, str(raw.get("captures", "captures/"))),
-        verdicts=_resolve_path(root, str(raw.get("verdicts", "verdicts/"))),
         logs=_resolve_path(root, str(raw.get("logs", "logs/"))),
-        database=_resolve_path(root, str(raw.get("database", "data/visio_gemini.db"))),
     )
 
 
@@ -179,15 +176,6 @@ def _parse_dashboard(raw: dict[str, Any] | None) -> DashboardConfig:
     )
 
 
-def _parse_persistence(raw: dict[str, Any] | None) -> PersistenceConfig:
-    data = raw or {}
-    return PersistenceConfig(
-        store_source=bool(data.get("store_source", True)),
-        store_provider=bool(data.get("store_provider", True)),
-        store_request_id=bool(data.get("store_request_id", True)),
-    )
-
-
 def load_app_config(
     config_path: Path | None = None,
     env_path: Path | None = None,
@@ -218,7 +206,6 @@ def load_app_config(
         macro=_parse_macro(yaml_cfg.get("macro")),
         providers=_parse_providers(yaml_cfg.get("providers")),
         dashboard=_parse_dashboard(yaml_cfg.get("dashboard")),
-        persistence=_parse_persistence(yaml_cfg.get("persistence")),
         openai_model=_env("OPENAI_MODEL", "gpt-5.4-mini"),
         playwright_browsers_path=_env(
             "PLAYWRIGHT_BROWSERS_PATH", str(DEFAULT_PLAYWRIGHT_BROWSERS_PATH)
