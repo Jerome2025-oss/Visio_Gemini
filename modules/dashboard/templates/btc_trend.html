@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visio Gemini — Tendance BTC H4</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="dash-nav">
+      <div>
+        <h1>Tendance BTC H4</h1>
+        <p>Contexte macro Ichimoku · scans planifiés (5×/jour) + contexte flash</p>
+      </div>
+      <nav class="dash-nav__links">
+        <a href="/">Dashboard</a>
+        <a href="/btc-trend" class="is-active">BTC H4</a>
+        <a href="/backtest">Backtest</a>
+        <a href="/manu">MANU</a>
+      </nav>
+    </header>
+
+    <section class="panel btc-trend-controls">
+      <div class="btc-trend-toolbar">
+        <div class="btc-period-select" role="group" aria-label="Période">
+          {% for p, label in [("2d", "2 jours"), ("7d", "7 jours"), ("30d", "30 jours"), ("all", "Tout")] %}
+          <button
+            type="button"
+            class="btc-period-btn{% if period == p %} is-active{% endif %}"
+            data-period="{{ p }}"
+          >{{ label }}</button>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <section class="panel btc-chart-panel btc-chart-panel--full">
+      <div class="btc-chart-head">
+        <h2>Historique du score</h2>
+        <div class="btc-legend funnel-card__meta">
+          <span><i class="dot dot-green"></i> 10 — haussier</span>
+          <span><i class="dot dot-yellow"></i> 5 — neutre</span>
+          <span><i class="dot dot-red"></i> 0 — baissier</span>
+          <span class="btc-legend-backfill"><i class="dot dot-muted"></i> historique manuel (estompé)</span>
+        </div>
+      </div>
+
+      <div class="btc-chart-wrap">
+        <canvas id="btc-trend-chart"></canvas>
+      </div>
+    </section>
+  </div>
+
+  <script id="btc-initial" type="application/json">{{ chart_initial | tojson }}</script>
+  <script>
+    const initialData = JSON.parse(document.getElementById("btc-initial").textContent);
+
+    let trendChart = null;
+    let currentPeriod = initialData.period || "30d";
+
+    function zoneBg(score) {
+      if (score >= 10) return "rgba(34, 197, 94, 0.12)";
+      if (score >= 5) return "rgba(234, 179, 8, 0.12)";
+      return "rgba(239, 68, 68, 0.12)";
+    }
+
+    function formatDateTime(snapshot) {
+      if (!snapshot) return "";
+      const raw = String(snapshot);
+      const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+      if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) return raw.replace("T", " ").slice(0, 16);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    }
+
+    function formatShortDate(snapshot) {
+      if (!snapshot) return "";
+      const raw = String(snapshot);
+      const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const d = m
+        ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]))
+        : new Date(raw);
+      if (Number.isNaN(d.getTime())) return raw.slice(0, 10);
+      const day = d.getUTCDate();
+      const month = d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" });
+      return `${day} ${month}`;
+    }
+
+    function renderTrend(labels, scores, pointColors, pointBackfill, pointMeta) {
+      const ctx = document.getElementById("btc-trend-chart");
+      if (trendChart) trendChart.destroy();
+      const meta = pointMeta || [];
+      const bgZones = scores.map((s) => zoneBg(s));
+      const radii = (pointBackfill || []).map((bf) => (bf ? 4 : 6));
+      const snapshotLabels = labels;
+
+      trendChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: snapshotLabels,
+          datasets: [{
+            label: "",
+            data: scores,
+            borderColor: "#3b82f6",
+            backgroundColor: "rgba(59, 130, 246, 0.08)",
+            pointBackgroundColor: pointColors,
+            pointBorderColor: pointColors,
+            pointRadius: radii,
+            pointHoverRadius: (pointBackfill || []).map((bf) => (bf ? 6 : 8)),
+            tension: 0.25,
+            fill: true,
+            segment: {
+              backgroundColor: (ctxSeg) => {
+                const i = ctxSeg.p0DataIndex;
+                return bgZones[i] || "transparent";
+              },
+            },
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: {
+            padding: { bottom: 4, left: 0, right: 8, top: 0 },
+          },
+          scales: {
+            y: {
+              min: 0,
+              max: 10,
+              ticks: { stepSize: 5, color: "#8b9bb4" },
+              grid: { color: "rgba(45, 58, 79, 0.6)" },
+            },
+            x: {
+              display: true,
+              ticks: {
+                color: "#8b9bb4",
+                maxRotation: 90,
+                minRotation: 90,
+                autoSkip: true,
+                autoSkipPadding: 12,
+                maxTicksLimit: 18,
+                callback: (_value, index) => formatShortDate(snapshotLabels[index]),
+              },
+              grid: { display: false },
+            },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              displayColors: false,
+              callbacks: {
+                title: () => "",
+                label: (item) => {
+                  const snap = snapshotLabels[item.dataIndex];
+                  return snap ? `📅 ${formatDateTime(snap)}` : "";
+                },
+                afterLabel: () => "",
+                footer: () => "",
+              },
+            },
+          },
+        },
+      });
+    }
+
+    function refreshChart(period) {
+      currentPeriod = period || currentPeriod || "30d";
+      fetch(`/btc-trend/data?period=${encodeURIComponent(currentPeriod)}`, {
+        headers: { Accept: "application/json" },
+      })
+        .then((r) => r.json())
+        .then(applyPayload)
+        .catch(() => {});
+    }
+
+    function applyPayload(data) {
+      const chart = data.chart_initial || data;
+      currentPeriod = data.period || chart.period || currentPeriod;
+      renderTrend(
+        chart.labels,
+        chart.scores,
+        chart.pointColors || data.point_colors,
+        chart.pointBackfill || data.point_backfill,
+        chart.pointMeta || data.point_meta
+      );
+      document.querySelectorAll(".btc-period-btn").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.period === currentPeriod);
+      });
+    }
+
+    document.querySelectorAll(".btc-period-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        refreshChart(btn.dataset.period);
+      });
+    });
+
+    renderTrend(
+      initialData.labels,
+      initialData.scores,
+      initialData.pointColors,
+      initialData.pointBackfill,
+      initialData.pointMeta
+    );
+  </script>
+</body>
+</html>

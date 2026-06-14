@@ -28,7 +28,7 @@ def test_usdt_parsing() -> None:
     print("=" * 60)
     print("TEST USDT.D — inversion parse_verdict (modules)")
     print("=" * 60)
-    parsed = parse_verdict("agent_a", SAMPLE_USDT_VERDICT, "USDT.D")
+    parsed = parse_verdict("agent_Ichimoku", SAMPLE_USDT_VERDICT, "USDT.D")
     print(json.dumps(parsed, ensure_ascii=False, indent=2))
     assert parsed["confiance"] == 3, f"Score crypto attendu 3 (10-7), got {parsed['confiance']}"
     assert parsed["verdict"] == "RED"
@@ -68,9 +68,9 @@ def test_run_batch_btc() -> list:
 
 def test_usdt_live() -> None:
     print("=" * 60)
-    print("TEST live USDT.D 4h agent_a (capture + vision + inversion)")
+    print("TEST live USDT.D 4h agent_Ichimoku (capture + vision + inversion)")
     print("=" * 60)
-    requests = build_manual_requests("USDT.D", "4h", agents=["agent_a"])
+    requests = build_manual_requests("USDT.D", "4h", agents=["agent_Ichimoku"])
     results = run_batch(requests)
     r = results[0]
     print(f"success: {r.success}")

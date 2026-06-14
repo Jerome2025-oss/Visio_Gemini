@@ -1,0 +1,14 @@
+[Unit]
+Description=Scan BTC H4 — 5x par jour
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 UTC
+OnCalendar=*-*-* 05:00:00 UTC
+OnCalendar=*-*-* 10:00:00 UTC
+OnCalendar=*-*-* 15:00:00 UTC
+OnCalendar=*-*-* 20:00:00 UTC
+Persistent=true
+Unit=visio-gemini-btc-scan.service
+
+[Install]
+WantedBy=timers.target

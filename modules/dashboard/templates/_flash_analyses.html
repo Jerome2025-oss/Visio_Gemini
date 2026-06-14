@@ -1,0 +1,103 @@
+<div class="flash-summary funnel-card__meta">
+  ✅ {{ n_accepted }} score ≥ 6/10 · 📊 {{ n_total }} flash(s) depuis la bascule
+  · 🟠 {{ n_btc_tradable }} BTC tradable(s) (≥5/10)
+  · vue : <strong class="{% if view == 'ichimoku' %}flash-summary__filter{% endif %}">{{ "Ichimoku (≥6/10)" if view == "ichimoku" else "Tous" }}</strong>
+  {% if btc_filter %} · filtre <strong class="flash-summary__filter">BTC H4</strong>{% endif %}
+</div>
+
+{% if not analyses %}
+  {% if btc_filter and view == "ichimoku" %}
+  <div class="empty">Aucun flash avec confiance ≥ 6/10 et contexte BTC tradable (score ≥ 5/10).</div>
+  {% elif btc_filter %}
+  <div class="empty">Aucun flash avec contexte BTC tradable (score ≥ 5/10). Bascule le filtre BTC H4 pour tout voir.</div>
+  {% elif view == "ichimoku" %}
+  <div class="empty">Aucun flash avec confiance ≥ 6/10 pour l'instant. Bascule sur « Tous » pour voir aussi les flashs écartés.</div>
+  {% else %}
+  <div class="empty">Aucun flash analysé depuis la bascule. Ils apparaîtront ici dès qu'un signal FLASH sera reçu.</div>
+  {% endif %}
+{% endif %}
+
+{% for a in analyses %}
+<div class="funnel-card">
+  <div class="funnel-card__head">
+    <span class="funnel-card__title">⚡ {{ a.token }} — Entonnoir Ichimoku 3TF</span>
+    <span class="funnel-card__meta">
+      #{{ a.id }}
+      {% if a.signal_time %} · 🕐 signal {{ a.signal_time }} UTC{% endif %}
+      {% if a.analysis_time %} · 🧠 analyse {{ a.analysis_time }} UTC{% endif %}
+    </span>
+  </div>
+
+  {% if a.charts %}
+  <div class="funnel-thumbs">
+    {% for chart in a.charts %}
+    {% set url = chart | png_url %}
+    <div class="funnel-thumb">
+      <span class="funnel-thumb__tf">{{ ["H4", "H1", "M15"][loop.index0] if loop.index0 < 3 else "TF" }}</span>
+      {% if url %}
+      <a href="{{ url }}" target="_blank" rel="noopener">
+        <img class="thumb" src="{{ url }}" alt="{{ a.token }} chart {{ loop.index }}">
+      </a>
+      {% else %}
+      <span class="funnel-thumb__warn">⚠️ aperçu indisponible</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="funnel-thumb__warn">⚠️ Charts non enregistrés pour cette analyse.</div>
+  {% endif %}
+
+  <div class="funnel-verdict">
+    <span class="badge badge-{{ a.score_color }}">🎯 CONFIANCE : {% if a.score_display %}{{ a.score_display }}/10{% else %}—{% endif %}</span>
+    {% if a.decision %}
+    <span class="badge badge-{{ a.decision_color }}">📌 {{ a.decision }}</span>
+    {% endif %}
+    <span class="badge badge-{{ a.btc_badge_color }}" title="Contexte macro BTC H4{% if a.btc_tenkan_slope %} · Tenkan {{ a.btc_tenkan_slope }}{% endif %}{% if a.btc_h4_snapshot %} · {{ a.btc_h4_snapshot }}{% endif %}">{{ a.btc_badge_label }}</span>
+    {% if a.pnl is not none %}
+    <span class="badge badge-{{ a.pnl_color }}">💰 PnL {{ "%+.2f"|format(a.pnl) }}{% if a.exit_type %} · {{ a.exit_type }}{% endif %}</span>
+    {% elif a.exit_type %}
+    <span class="badge badge-muted">{{ a.exit_type }}</span>
+    {% else %}
+    <span class="funnel-card__meta">PnL en attente</span>
+    {% endif %}
+  </div>
+
+  {% if a.signal_time %}
+  <div class="flash-sim">
+    <form
+      class="flash-sim__form"
+      data-sim-key="{{ a.token }}|{{ a.signal_time }}"
+      hx-get="/flash/simulate"
+      hx-target="#flash-sim-{{ a.id }}"
+      hx-swap="innerHTML"
+      hx-indicator="#flash-sim-spin-{{ a.id }}"
+    >
+      <input type="hidden" name="symbol" value="{{ a.token }}">
+      <input type="hidden" name="flash_ts" value="{{ a.signal_time }}">
+      <label>Levier
+        <input type="number" name="leverage" value="10" min="1" max="50" step="1">
+      </label>
+      <label>TP %
+        <input type="number" name="tp" value="8" min="1" max="50" step="0.5">
+      </label>
+      <label>SL %
+        <input type="number" name="sl" value="2" min="1" max="20" step="0.5">
+      </label>
+      <button type="submit">🧮 Simuler</button>
+      <span id="flash-sim-spin-{{ a.id }}" class="htmx-indicator funnel-card__meta">simulation…</span>
+    </form>
+    <div id="flash-sim-{{ a.id }}" class="flash-sim__result"></div>
+  </div>
+  {% else %}
+  <div class="funnel-card__meta">⚠️ Pas d'horodatage de signal — simulation backtest indisponible.</div>
+  {% endif %}
+
+  {% if a.report_text %}
+  <details class="analysis-details">
+    <summary>Rapport Ichimoku complet — Gemini</summary>
+    <pre class="analysis-text">{{ a.report_text }}</pre>
+  </details>
+  {% endif %}
+</div>
+{% endfor %}

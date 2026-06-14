@@ -72,6 +72,17 @@
       <td colspan="7" class="job-fail">{{ r.error }}</td>
     </tr>
     {% endif %}
+    {% set analysis_text = r.verdict_text or (r.vision.text if r.vision else none) %}
+    {% if r.success and analysis_text %}
+    <tr class="analysis-row">
+      <td colspan="7">
+        <details class="analysis-details" open>
+          <summary>Analyse complète — {{ r.vision.model if r.vision else "Gemini" }}</summary>
+          <pre class="analysis-text">{{ analysis_text }}</pre>
+        </details>
+      </td>
+    </tr>
+    {% endif %}
     {% endfor %}
   </tbody>
 </table>

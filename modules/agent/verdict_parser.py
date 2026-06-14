@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 
 _ABSENT_MARKERS: dict[str, str] = {
-    "agent_a": "ICHIMOKU ABSENT",
-    "agent_b": "BB ABSENT",
-    "agent_c": "EMA50/200 ABSENT",
+    "agent_Ichimoku": "ICHIMOKU ABSENT",
+    "agent_BB": "BB ABSENT",
+    "agent_EMA": "EMA50/200 ABSENT",
 }
 
 

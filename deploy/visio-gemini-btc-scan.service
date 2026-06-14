@@ -1,0 +1,13 @@
+[Unit]
+Description=Visio Gemini — Scan BTC H4 ponctuel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/Visio_Gemini
+EnvironmentFile=/root/Visio_Gemini/.env
+ExecStart=/root/Visio_Gemini/.venv/bin/python -m modules.schedulers.btc_h4_scheduled
+StandardOutput=journal
+StandardError=journal

@@ -9,71 +9,151 @@
 </head>
 <body>
   <div class="wrap">
-    <header>
-      <h1>Visio Gemini</h1>
-      <p>Analyse macro TradingView · résultats en mémoire · port 8004</p>
+    <header class="dash-nav">
+      <div>
+        <h1>Visio Gemini</h1>
+        <p>Analyses automatiques FLASH · port 8004</p>
+      </div>
+      <nav class="dash-nav__links">
+        <a href="/" class="is-active">Dashboard</a>
+        <a href="/btc-trend">BTC H4</a>
+        <a href="/backtest">Backtest</a>
+        <a href="/manu">MANU</a>
+      </nav>
     </header>
 
     <section class="panel">
-      <form
-        hx-post="/run"
-        hx-target="#results"
-        hx-swap="innerHTML"
-        hx-indicator="#run-spinner"
-      >
-        <div class="form-grid">
-          <div>
-            <label for="symbol">Symbole</label>
-            <input
-              type="text"
-              id="symbol"
-              name="symbol"
-              value="BTCUSDT"
-              placeholder="BTCUSDT"
-              required
-            >
-          </div>
-          <div>
-            <label for="timeframe">Timeframe</label>
-            <select id="timeframe" name="timeframe">
-              {% for tf in timeframes %}
-              <option value="{{ tf.value }}"{% if tf.key == "1h" %} selected{% endif %}>{{ tf.label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div>
-            <label>Agents</label>
-            <div class="agents">
-              {% for agent_id, agent in agents_config.items() %}
-              <label>
-                <input type="checkbox" name="agents" value="{{ agent_id }}" checked>
-                {{ agent_id }} — {{ agent.name }}
-              </label>
-              {% endfor %}
-            </div>
-          </div>
-          <div>
-            <button type="submit">Lancer</button>
-            <span id="run-spinner" class="htmx-indicator" style="margin-left:0.5rem;color:var(--muted);font-size:0.85rem;">Analyse en cours…</span>
+      <div class="results-head">
+        <h2>⚡ Analyses automatiques (FLASH)</h2>
+        <div class="flash-controls">
+          <div class="flash-toggle" role="group" aria-label="Filtre des flashs">
+            <button
+              type="button"
+              class="flash-toggle__btn is-active"
+              data-view="all"
+            >Tous</button>
+            <button
+              type="button"
+              class="flash-toggle__btn"
+              data-view="ichimoku"
+            >Ichimoku</button>
+            <button
+              type="button"
+              class="flash-btc-toggle"
+              title="Afficher uniquement les flashs avec contexte BTC tradable (score ≥ 5/10)"
+            >BTC H4</button>
           </div>
         </div>
-      </form>
-    </section>
-
-    <section class="panel">
-      <div class="results-head">
-        <h2>Résultats</h2>
-        <button
-          type="button"
-          hx-get="/results"
-          hx-target="#results"
-          hx-swap="innerHTML"
-        >Rafraîchir</button>
       </div>
-      <div id="results">
-        {% include "_results.html" %}
+      <div
+        id="flash-analyses"
+        hx-get="/flash?view=all"
+        hx-trigger="load"
+        hx-swap="innerHTML"
+      >
+        <div class="empty">Chargement…</div>
       </div>
     </section>
   </div>
+
+  <script>
+    // Mémorisation des réglages TP/SL/levier par carte FLASH (localStorage).
+    (function () {
+      var FIELDS = ["leverage", "tp", "sl"];
+
+      function keyOf(form) {
+        return form.getAttribute("data-sim-key");
+      }
+
+      function restore(form) {
+        var key = keyOf(form);
+        if (!key) return;
+        var raw = localStorage.getItem("flashSim:" + key);
+        if (!raw) return;
+        try {
+          var saved = JSON.parse(raw);
+          FIELDS.forEach(function (name) {
+            if (saved[name] == null) return;
+            var input = form.querySelector('[name="' + name + '"]');
+            if (input) input.value = saved[name];
+          });
+        } catch (e) { /* clé corrompue : on ignore */ }
+      }
+
+      function save(form) {
+        var key = keyOf(form);
+        if (!key) return;
+        var data = {};
+        FIELDS.forEach(function (name) {
+          var input = form.querySelector('[name="' + name + '"]');
+          if (input) data[name] = input.value;
+        });
+        localStorage.setItem("flashSim:" + key, JSON.stringify(data));
+      }
+
+      document.body.addEventListener("htmx:afterSwap", function (e) {
+        var root = e.target;
+        if (!root || !root.querySelectorAll) return;
+        root.querySelectorAll(".flash-sim__form").forEach(restore);
+      });
+
+      document.body.addEventListener("change", function (e) {
+        var form = e.target.closest ? e.target.closest(".flash-sim__form") : null;
+        if (form) save(form);
+      });
+
+      document.body.addEventListener("htmx:configRequest", function (e) {
+        var el = e.target;
+        if (el && el.classList && el.classList.contains("flash-sim__form")) save(el);
+      });
+    })();
+
+    function flashListUrl() {
+      var viewBtn = document.querySelector(".flash-toggle__btn.is-active");
+      var view = viewBtn ? viewBtn.getAttribute("data-view") : "all";
+      var btcBtn = document.querySelector(".flash-btc-toggle");
+      var btc = btcBtn && btcBtn.classList.contains("is-active") ? "1" : "0";
+      return "/flash?view=" + view + "&btc=" + btc;
+    }
+
+    function flashLoad() {
+      htmx.ajax("GET", flashListUrl(), { target: "#flash-analyses", swap: "innerHTML" });
+    }
+
+    document.body.addEventListener("click", function (e) {
+      var viewBtn = e.target.closest ? e.target.closest(".flash-toggle__btn") : null;
+      if (viewBtn) {
+        viewBtn.parentElement.querySelectorAll(".flash-toggle__btn").forEach(function (b) {
+          b.classList.remove("is-active");
+        });
+        viewBtn.classList.add("is-active");
+        flashLoad();
+        return;
+      }
+      var btcBtn = e.target.closest ? e.target.closest(".flash-btc-toggle") : null;
+      if (btcBtn) {
+        btcBtn.classList.toggle("is-active");
+        flashLoad();
+      }
+    });
+
+    (function () {
+      var knownLatestId = null;
+      function ping() {
+        fetch("/flash/ping", { headers: { Accept: "application/json" } })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (knownLatestId === null) { knownLatestId = d.latest_id; return; }
+            if (d.latest_id > knownLatestId) {
+              knownLatestId = d.latest_id;
+              flashLoad();
+            }
+          })
+          .catch(function () {});
+      }
+      setInterval(ping, 30000);
+      ping();
+    })();
+  </script>
 </body>
 </html>

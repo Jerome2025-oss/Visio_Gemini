@@ -166,3 +166,113 @@ class MammouthProvider(VisionProvider):
             verdict_path=None,
             raw_meta=meta,
         )
+
+    def analyze_multi(
+        self,
+        image_paths: list[Path],
+        prompt: str,
+        *,
+        context: AnalyzeContext | None = None,
+    ) -> VisionResult:
+        """Analyse plusieurs images dans UN SEUL appel (ordre préservé).
+
+        Utilisé par l'entonnoir Ichimoku (H4 → H1 → M15). Réutilise les helpers
+        de coût/log du provider ; aucun verdict GREEN/YELLOW/RED n'est forcé
+        (le format de sortie est libre, parsé en aval par l'appelant).
+        """
+        if not prompt.strip():
+            raise ProviderError("Prompt vide", reason="invalid_input")
+        if context is None:
+            raise ProviderError(
+                "AnalyzeContext requis pour Mammouth",
+                reason="missing_context",
+            )
+        paths = [Path(p) for p in image_paths]
+        if not paths:
+            raise ProviderError("Aucune image fournie", reason="invalid_input")
+        for path in paths:
+            if not path.is_file():
+                raise ProviderError(f"Image introuvable : {path}", reason="invalid_input")
+
+        app = load_app_config()
+        api_key = app.providers.openai_api_key
+        base_url = app.providers.openai_base_url
+        model = app.providers.chart_vision_model
+
+        if not api_key:
+            raise ProviderError("OPENAI_API_KEY absente du .env", reason="missing_api_key")
+
+        print(f"🧠 Modèle vision    : {model}")
+        print(f"🌐 Endpoint         : {base_url}")
+        print(f"📋 Agent            : {context.agent_id} (multi-image x{len(paths)})")
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for path in paths:
+            data_url = f"data:image/png;base64,{_encode_image(path)}"
+            content.append({"type": "image_url", "image_url": {"url": data_url}})
+
+        try:
+            print("📡 Appel API multi-image en cours...")
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": content}],
+            )
+        except Exception as exc:
+            raise ProviderError(str(exc), reason="api_error") from exc
+
+        text = (response.choices[0].message.content or "").strip()
+        if not text:
+            raise ProviderError("Réponse Mammouth vide", reason="empty_response")
+
+        usage = response.usage
+        prompt_tokens = int(usage.prompt_tokens if usage else 0)
+        completion_tokens = int(usage.completion_tokens if usage else 0)
+        cost_usd = round(_estimate_cost_usd(model, prompt_tokens, completion_tokens), 6)
+        cost_eur = _estimate_cost_eur(model, prompt_tokens, completion_tokens)
+
+        meta: dict[str, Any] = {
+            "model": model,
+            "base_url": base_url,
+            "image_paths": [str(p.resolve()) for p in paths],
+            "image_count": len(paths),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+            "cost_usd": cost_usd,
+            "cost_eur": cost_eur,
+            "analyzed_at": datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+
+        log_entry = {
+            "agent_id": context.agent_id,
+            "symbol_key": context.symbol_key,
+            "timeframe": context.timeframe_label,
+            "layout_id": context.layout_id,
+            "multi_image": True,
+            "image_count": len(paths),
+            "verdict_preview": text[:200].replace("\n", " "),
+            "_meta": meta,
+        }
+        log_path = _append_cost_log(app.paths.logs, log_entry)
+        meta["log_path"] = str(log_path.resolve())
+
+        print(
+            f"💸 Coût estimé      : {cost_eur:.6f} € "
+            f"({prompt_tokens} in + {completion_tokens} out = {prompt_tokens + completion_tokens} tokens)"
+        )
+
+        return VisionResult(
+            text=text,
+            provider="mammouth",
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost_usd,
+            cost_eur=cost_eur,
+            verdict_path=None,
+            raw_meta=meta,
+        )

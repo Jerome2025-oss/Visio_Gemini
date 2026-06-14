@@ -186,9 +186,9 @@ Dans `tv_cookies_raw.json`, les cookies critiques :
 
 | Agent   | Layout ID  |
 |---------|------------|
-| agent_a | VLmoQO22   |
-| agent_b | guJhPkAj   |
-| agent_c | bl0W3Xyj   |
+| agent_Ichimoku | VLmoQO22   |
+| agent_BB | guJhPkAj   |
+| agent_EMA | bl0W3Xyj   |
 
 ### « Playwright timeout / page ne charge pas »
 

@@ -1,0 +1,52 @@
+{% if funnel_error and not funnel %}
+<div class="error">⚠️ {{ funnel_error }}</div>
+{% endif %}
+
+{% if funnel %}
+<div class="funnel-card">
+  <div class="funnel-card__head">
+    <span class="funnel-card__title">📊 {{ funnel.symbol_key }} — Entonnoir Ichimoku 3TF</span>
+    <span class="funnel-card__meta">H4 · H1 · M15{% if funnel.model %} · {{ funnel.model }}{% endif %}{% if funnel.cost_eur is not none %} · {{ "%.4f"|format(funnel.cost_eur) }} €{% endif %}</span>
+  </div>
+
+  {% if funnel.captures %}
+  <div class="funnel-thumbs">
+    {% for cap in funnel.captures %}
+    <div class="funnel-thumb">
+      <span class="funnel-thumb__tf">{{ cap.tf_label }}</span>
+      {% if cap.png_path %}
+        {% set url = cap.png_path | png_url %}
+        {% if url %}
+        <a href="{{ url }}" target="_blank" rel="noopener">
+          <img class="thumb" src="{{ url }}" alt="{{ funnel.symbol_key }} {{ cap.tf_label }}">
+        </a>
+        {% else %}
+        <span class="funnel-thumb__warn">⚠️ aperçu indisponible</span>
+        {% endif %}
+      {% else %}
+        <span class="funnel-thumb__warn">⚠️ Capture {{ cap.tf_label }} indisponible</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if funnel_error %}
+  <div class="error">⚠️ {{ funnel_error }}</div>
+  {% endif %}
+
+  {% if funnel.report_text %}
+  <div class="funnel-verdict">
+    <span class="funnel-verdict__conf">🎯 CONFIANCE : {% if funnel.confiance is not none %}{{ funnel.confiance | score_fr }}/10{% else %}—{% endif %}</span>
+    {% if funnel.decision %}
+    <span class="badge badge-{{ funnel.decision_color }}">📌 {{ funnel.decision }}</span>
+    {% endif %}
+  </div>
+
+  <details class="analysis-details" open>
+    <summary>Rapport Ichimoku complet — {{ funnel.model or "Gemini" }}</summary>
+    <pre class="analysis-text">{{ funnel.report_text }}</pre>
+  </details>
+  {% endif %}
+</div>
+{% endif %}

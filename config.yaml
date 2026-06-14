@@ -5,6 +5,8 @@ paths:
   storage_state: secrets/storage_state.json
   captures: captures/
   logs: logs/
+  # Liste Bitunix Perp USDT (refresh : Detecte_Pump_Bitunix_P/refresh_bitunix_perps.py)
+  bitunix_perps: ../Detecte_Pump_Bitunix_P/bitunix_perps.json
 
 # ── Timeframes TradingView (minutes) ───────────────────────
 timeframes:
@@ -33,14 +35,14 @@ symbols:
     timeframes: ["5m", "15m", "30m", "1h", "4h", "1D"]
 
   BTCUSDT:
-    tv: BINANCE:BTCUSDT
+    tv: BITUNIX:BTCUSDT.P
     role: correlation_confirmation
     timeframes: ["5m", "15m", "30m", "1h", "4h", "1D"]
 
 # ── Agents ↔ layouts TradingView ───────────────────────────
 agents:
-  agent_a:
-    name: Ichimoku + RSI
+  agent_Ichimoku:
+    name: Ichimoku
     indicators: [ichimoku, rsi]
     layout:
       id: VLmoQO22
@@ -48,8 +50,8 @@ agents:
     verdict_scale: [GREEN, YELLOW, RED]
     enabled: true
 
-  agent_b:
-    name: BB + Volume
+  agent_BB:
+    name: Bollinger Bands
     indicators: [bollinger_bands, volume]
     layout:
       id: guJhPkAj
@@ -57,7 +59,7 @@ agents:
     verdict_scale: [GREEN, YELLOW, RED]
     enabled: true
 
-  agent_c:
+  agent_EMA:
     name: EMA50/200 + MACD
     indicators: [ema50, ema200, macd]
     layout:
@@ -68,7 +70,7 @@ agents:
 
 # ── Exécution courante ─────────────────────────────────────
 run:
-  agents: [agent_a, agent_b, agent_c]
+  agents: [agent_Ichimoku, agent_BB, agent_EMA]
   symbols: [BTCUSDT]
   timeframes: ["4h"]
   priority_timeframes: ["4h", "1D"]
@@ -81,7 +83,7 @@ capture:
 
 # ── Grille macro (référence unique pour modules/) ──
 macro:
-  agents: [agent_a, agent_b, agent_c]
+  agents: [agent_Ichimoku, agent_BB, agent_EMA]
   symbols: [TOTAL3ES, OTHERS, USDT.D, BTCUSDT]
   timeframes: ["4h", "1D"]
 

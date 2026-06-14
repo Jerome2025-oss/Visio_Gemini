@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visio Gemini — Analyse manuelle</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="dash-nav">
+      <div>
+        <h1>Analyse manuelle</h1>
+        <p>Lancement manuel · agents multi-TF · entonnoir Ichimoku 3TF</p>
+      </div>
+      <nav class="dash-nav__links">
+        <a href="/">Dashboard</a>
+        <a href="/btc-trend">BTC H4</a>
+        <a href="/backtest">Backtest</a>
+        <a href="/manu" class="is-active">MANU</a>
+      </nav>
+    </header>
+
+    <section class="panel">
+      <form
+        hx-post="/run"
+        hx-target="#results"
+        hx-swap="innerHTML"
+        hx-indicator="#run-spinner"
+      >
+        <div class="form-grid">
+          <div>
+            <label for="symbol">Symbole</label>
+            <input
+              type="text"
+              id="symbol"
+              name="symbol"
+              value="BTCUSDT"
+              placeholder="BTCUSDT"
+              required
+            >
+          </div>
+          <div>
+            <label for="timeframe">Timeframe</label>
+            <select id="timeframe" name="timeframe">
+              {% for tf in timeframes %}
+              <option value="{{ tf.value }}"{% if tf.key == "1h" %} selected{% endif %}>{{ tf.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Agents</label>
+            <div class="agents">
+              {% for agent_id, agent in agents_config.items() %}
+              <label>
+                <input type="checkbox" name="agents" value="{{ agent_id }}" checked>
+                {{ agent_id }} — {{ agent.name }}
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+          <div>
+            <button type="submit">Lancer</button>
+            <span id="run-spinner" class="htmx-indicator" style="margin-left:0.5rem;color:var(--muted);font-size:0.85rem;">Analyse en cours…</span>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="results-head">
+        <h2>Résultats</h2>
+        <button
+          type="button"
+          hx-get="/results"
+          hx-target="#results"
+          hx-swap="innerHTML"
+        >Rafraîchir</button>
+      </div>
+      <div id="results">
+        {% include "_results.html" %}
+      </div>
+    </section>
+
+    <section class="panel funnel-panel">
+      <div class="funnel-head">
+        <h2>📊 Analyse Ichimoku — Entonnoir 3 Timeframes</h2>
+        <p class="funnel-sub">H4 → H1 → M15 · Analyse en entonnoir · agent_Ichimoku</p>
+      </div>
+
+      <form
+        class="funnel-form"
+        hx-post="/run_funnel"
+        hx-target="#funnel-result"
+        hx-swap="innerHTML"
+        hx-indicator="#funnel-spinner"
+      >
+        <div class="funnel-row">
+          <div class="funnel-field">
+            <label for="funnel-symbol">Symbole</label>
+            <input
+              type="text"
+              id="funnel-symbol"
+              name="symbol"
+              value="BTCUSDT"
+              placeholder="BTCUSDT"
+              required
+            >
+          </div>
+          <div class="funnel-field">
+            <label>Indicateur</label>
+            <span class="funnel-badge">📊 agent_Ichimoku — Ichimoku</span>
+          </div>
+          <div class="funnel-field funnel-field--action">
+            <button type="submit">🚀 Lancer l'entonnoir</button>
+            <span id="funnel-spinner" class="htmx-indicator funnel-spinner">Entonnoir en cours (3 captures + analyse)…</span>
+          </div>
+        </div>
+      </form>
+
+      <div id="funnel-result"></div>
+    </section>
+  </div>
+</body>
+</html>

@@ -16,7 +16,7 @@ from modules.agent.providers import AnalyzeContext, analyze_with_strategy
 from modules.analyse.contracts import AnalysisRequest
 from modules.analyse.results import AnalysisResult
 from modules.capture import capture
-from modules.selection import resolve_symbol_tv
+from modules.selection.resolver import resolve_symbol_tv
 from modules.agent.verdict_parser import parse_verdict
 
 logger = logging.getLogger("visio_gemini.orchestrator")

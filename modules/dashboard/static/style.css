@@ -23,7 +23,7 @@ body {
 }
 
 .wrap {
-  max-width: 1100px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 1.5rem;
 }
@@ -208,4 +208,737 @@ th {
 .job-fail {
   color: #fca5a5;
   font-size: 0.8rem;
+}
+
+.analysis-row td {
+  padding-top: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.analysis-details {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.analysis-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  user-select: none;
+  margin-bottom: 0.5rem;
+}
+
+.analysis-details summary:hover {
+  color: var(--text);
+}
+
+.analysis-text {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  max-height: 28rem;
+  overflow-y: auto;
+}
+
+/* ── Section entonnoir Ichimoku 3TF ── */
+.funnel-panel {
+  border-color: rgba(34, 211, 238, 0.35);
+}
+
+.funnel-head {
+  margin-bottom: 1rem;
+}
+
+.funnel-head h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.1rem;
+}
+
+.funnel-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.funnel-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+}
+
+.funnel-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.funnel-field--action {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.funnel-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 0.8rem;
+  border-radius: 6px;
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  color: #67e8f9;
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.funnel-spinner {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.funnel-card {
+  margin-top: 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 1rem;
+}
+
+.funnel-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.funnel-card__title {
+  font-weight: 700;
+  font-size: 0.98rem;
+}
+
+.funnel-card__meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.funnel-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-bottom: 0.9rem;
+}
+
+.funnel-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.funnel-thumb__tf {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #67e8f9;
+}
+
+.funnel-thumb__warn {
+  display: inline-flex;
+  align-items: center;
+  height: 68px;
+  padding: 0 0.6rem;
+  font-size: 0.78rem;
+  color: #fca5a5;
+  border: 1px dashed rgba(239, 68, 68, 0.4);
+  border-radius: 4px;
+}
+
+.funnel-verdict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.funnel-verdict__conf {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+/* ── Toggle Tous / Ichimoku (liste FLASH) ──────────────────────────── */
+.flash-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.flash-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.flash-toggle__btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 0.35rem 0.95rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.flash-toggle__btn:hover {
+  color: var(--text);
+}
+
+.flash-toggle__btn.is-active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.flash-btc-toggle {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.35rem 0.95rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.flash-btc-toggle:hover {
+  color: var(--text);
+}
+
+.flash-btc-toggle.is-active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.flash-summary {
+  margin-bottom: 0.8rem;
+}
+
+.flash-summary__filter {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ── Navigation dashboard ───────────────────────────────────────────── */
+.dash-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.dash-nav h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+}
+
+.dash-nav p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.dash-nav__links {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.dash-nav__links a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.dash-nav__links a:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.dash-nav__links a.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* ── Page tendance BTC H4 ─────────────────────────────────────────── */
+.btc-trend-controls {
+  margin-bottom: 1rem;
+}
+
+.btc-trend-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+}
+
+.btc-legend-backfill {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+.dot-muted {
+  background: rgba(139, 155, 180, 0.45);
+}
+
+.btc-period-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.btc-period-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.35rem 0.9rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.btc-period-btn.is-active {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: #eab308;
+  color: #fde047;
+  font-weight: 700;
+}
+
+.btc-trend-grid {
+  display: block;
+}
+
+.btc-chart-panel--full {
+  width: 100%;
+}
+
+.btc-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.btc-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 70vh;
+  min-height: 320px;
+  padding-bottom: 0.5rem;
+  box-sizing: border-box;
+}
+
+.btc-chart-wrap canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+@media (max-width: 900px) {
+  .btc-trend-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.btc-gauge-wrap {
+  position: relative;
+  width: 220px;
+  margin: 0 auto 0.5rem;
+}
+
+.btc-gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.btc-gauge-score {
+  font-size: 1.4rem;
+  font-weight: 800;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+}
+
+.btc-gauge-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+}
+
+.btc-streak {
+  text-align: center;
+  margin-top: 0.5rem;
+}
+
+.btc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.dot {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  margin-right: 0.25rem;
+  vertical-align: middle;
+}
+
+.dot-green { background: #22c55e; }
+.dot-yellow { background: #eab308; }
+.dot-red { background: #ef4444; }
+
+/* ── Page Backtest historique ─────────────────────────────────────── */
+.backtest-controls {
+  margin-bottom: 1rem;
+}
+
+.backtest-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.backtest-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.backtest-form input[type="number"] {
+  width: 5rem;
+  padding: 0.3rem 0.45rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.backtest-filtre {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.backtest-filtre-label {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+}
+
+.backtest-toggle {
+  cursor: pointer;
+  margin: 0;
+}
+
+.backtest-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.backtest-toggle__face {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: rgba(139, 155, 180, 0.12);
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+
+.backtest-toggle:last-of-type .backtest-toggle__face {
+  border-right: none;
+}
+
+.backtest-toggle:has(input:checked) .backtest-toggle__face {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.backtest-run-btn {
+  padding: 0.45rem 1rem;
+  font-weight: 700;
+}
+
+.backtest-spinner {
+  align-self: center;
+}
+
+.backtest-stats-panel {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.backtest-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.backtest-stats__group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.backtest-stats__sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 3rem;
+  background: rgba(139, 155, 180, 0.35);
+  flex-shrink: 0;
+}
+
+.bt-stat-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-width: 5rem;
+  padding: 0.55rem 0.85rem;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(139, 155, 180, 0.22);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.bt-stat-pill__label {
+  font-size: 0.62rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.bt-stat-pill__value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.bt-stat-pill__sub {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.bt-stat-pill__value.pnl-up {
+  color: #00ff88;
+}
+
+.bt-stat-pill__value.pnl-down {
+  color: #ff4444;
+}
+
+.bt-stat-pill__value.pnl-neutral {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.bt-stat-pill__value.pnl-live {
+  font-style: italic;
+  font-weight: 600;
+}
+
+.backtest-meta {
+  margin-bottom: 0.75rem;
+}
+
+.backtest-table-wrap {
+  overflow-x: auto;
+}
+
+.backtest-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.backtest-table th,
+.backtest-table td {
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.backtest-table th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.backtest-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.backtest-table .bt-pnl.pnl-up {
+  color: #00ff88;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.backtest-table .bt-pnl.pnl-down {
+  color: #ff4444;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.backtest-table .bt-pnl.pnl-up.pnl-live,
+.backtest-table .bt-pnl.pnl-down.pnl-live {
+  font-style: italic;
+  font-weight: 600;
+  animation: backtest-pnl-pulse 2s ease-in-out infinite;
+}
+
+@keyframes backtest-pnl-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+.backtest-table .bt-pnl.pnl-neutral {
+  color: var(--muted);
+}
+
+.backtest-table .bt-pnl.pnl-neutral.pnl-live {
+  font-style: italic;
+  animation: backtest-pnl-pulse 2s ease-in-out infinite;
+}
+
+/* ── Simulation backtest (FLASH × bitunix) ─────────────────────────── */
+.flash-sim {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--border);
+}
+
+.flash-sim__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.flash-sim__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.flash-sim__form input[type="number"] {
+  width: 4.6rem;
+  padding: 0.25rem 0.4rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.flash-sim__form button {
+  padding: 0.3rem 0.8rem;
+}
+
+.flash-sim__result {
+  margin-top: 0.55rem;
+}
+
+.flash-sim__out {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.flash-sim__pnl {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.flash-sim__context {
+  margin-top: 0.35rem;
+}
+
+.flash-sim__context-note {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.flash-sim__error {
+  color: #fca5a5;
+  font-size: 0.8rem;
+}
+
+.pnl-up {
+  color: #86efac;
+}
+
+.pnl-down {
+  color: #fca5a5;
+}
+
+.pnl-neutral {
+  color: var(--muted);
+}
+
+/* PnL provisoire (trade EN COURS) : gris + italique, comme la page bitunix. */
+.pnl-provisional {
+  color: var(--muted);
+  font-style: italic;
+  font-weight: 600;
 }

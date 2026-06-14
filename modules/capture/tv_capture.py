@@ -60,7 +60,13 @@ def _build_output_path(cfg: CaptureJob) -> Path:
     return cfg.captures_dir / filename
 
 
-def capture_chart(cfg: CaptureJob, wait_ms: int | None = None) -> Path:
+def capture_chart(
+    cfg: CaptureJob,
+    wait_ms: int | None = None,
+    *,
+    viewport: dict[str, int] | None = None,
+    zoom_out_steps: int = 0,
+) -> Path:
     """
     Capture le graphique configuré et retourne le chemin du PNG généré.
 
@@ -85,15 +91,27 @@ def capture_chart(cfg: CaptureJob, wait_ms: int | None = None) -> Path:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=cfg.capture_headless)
+        effective_viewport = viewport or cfg.capture_viewport
         context = browser.new_context(
             storage_state=str(cfg.storage_state_path),
-            viewport=cfg.capture_viewport,
+            viewport=effective_viewport,
         )
         page = context.new_page()
         try:
             print("🌐 Navigation...")
             page.goto(url, wait_until="domcontentloaded", timeout=30_000)
             page.wait_for_timeout(effective_wait_ms)
+
+            if zoom_out_steps > 0:
+                print(f"🔭 Zoom arrière ({zoom_out_steps} étapes)…")
+                try:
+                    page.locator("canvas").first.click(timeout=5_000)
+                except PWTimeout:
+                    pass
+                for _ in range(zoom_out_steps):
+                    page.keyboard.press("-")
+                    page.wait_for_timeout(120)
+                page.wait_for_timeout(800)
 
             final_url = page.url
             print(f"📍 URL finale       : {final_url}")

@@ -1,0 +1,20 @@
+[Unit]
+Description=Visio Gemini — Auto listener FLASH Telegram → entonnoir Ichimoku
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Visio_Gemini
+EnvironmentFile=/root/Visio_Gemini/.env
+# IMPORTANT : telethon est installé dans venv/ (pas .venv/)
+ExecStart=/root/Visio_Gemini/venv/bin/python -m modules.triggers.auto_listener
+Restart=always
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

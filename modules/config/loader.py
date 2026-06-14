@@ -61,6 +61,15 @@ def _parse_paths(root: Path, raw: dict[str, Any]) -> PathsConfig:
         ),
         captures=_resolve_path(root, str(raw.get("captures", "captures/"))),
         logs=_resolve_path(root, str(raw.get("logs", "logs/"))),
+        bitunix_perps=_resolve_path(
+            root,
+            str(
+                raw.get(
+                    "bitunix_perps",
+                    "../Detecte_Pump_Bitunix_P/bitunix_perps.json",
+                )
+            ),
+        ),
     )
 
 
@@ -124,7 +133,8 @@ def _parse_run(raw: dict[str, Any]) -> RunConfig:
 def _parse_macro(raw: dict[str, Any] | None) -> MacroConfig:
     data = raw or {}
     return MacroConfig(
-        agents=_as_tuple(data.get("agents")) or ("agent_a", "agent_b", "agent_c"),
+        agents=_as_tuple(data.get("agents"))
+        or ("agent_Ichimoku", "agent_BB", "agent_EMA"),
         symbols=_as_tuple(data.get("symbols"))
         or ("TOTAL3ES", "OTHERS", "USDT.D", "BTCUSDT"),
         timeframes=_as_tuple(data.get("timeframes")) or ("4h", "1D"),

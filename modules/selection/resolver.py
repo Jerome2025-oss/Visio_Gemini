@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from modules.config import load_app_config
+from modules.selection.bitunix_symbols import (
+    bitunix_to_tv_symbol,
+    get_bitunix_perp_symbols,
+    is_bitunix_perp,
+    normalize_token_key,
+)
 
 
 class UnknownTokenError(ValueError):
-    """Token absent de config.yaml — pas de résolution silencieuse."""
+    """Token absent de config.yaml et de la liste Bitunix Perp USDT."""
 
 
 class LayoutNotReadyError(RuntimeError):
@@ -15,21 +21,32 @@ class LayoutNotReadyError(RuntimeError):
 
 def resolve_symbol_tv(token: str, *, allow_unknown: bool = False) -> str:
     """
-    Résout une clé config vers un symbole TradingView.
+    Résout une clé vers un symbole TradingView.
 
-    Par défaut lève ``UnknownTokenError`` si le token n'est pas dans config.
-    ``allow_unknown=True`` (opt-in futur) : ``BINANCE:{token}``.
+    1. Clés ``config.yaml`` (macro CRYPTOCAP, etc.) → ``symbol.tv`` explicite.
+    2. Symboles Bitunix Perp USDT (``bitunix_perps.json``) → ``BITUNIX:XXXUSDT.P``.
+    3. ``allow_unknown=True`` (opt-in) : ``BITUNIX:{token}.P`` sans validation liste.
     """
+    key = normalize_token_key(token)
     app = load_app_config()
-    symbol = app.symbols.get(token)
+
+    symbol = app.symbols.get(key)
     if symbol is not None:
         return symbol.tv
+
+    if is_bitunix_perp(key):
+        return bitunix_to_tv_symbol(key)
+
     if allow_unknown:
-        return f"BINANCE:{token}"
-    known = ", ".join(sorted(app.symbols))
+        return bitunix_to_tv_symbol(key)
+
+    known_config = ", ".join(sorted(app.symbols))
+    perp_count = len(get_bitunix_perp_symbols())
     raise UnknownTokenError(
-        f"Token inconnu : {token!r}. Tokens configurés : {known}. "
-        "Pas de résolution silencieuse (évite capture/verdict bidon)."
+        f"Token inconnu : {key!r}. "
+        f"Config : {known_config}. "
+        f"Bitunix Perp USDT : {perp_count} symboles (fichier {app.paths.bitunix_perps}). "
+        "Pas de résolution silencieuse."
     )
 
 
@@ -67,15 +84,20 @@ def resolve_timeframe_minutes(timeframe_label: str) -> int:
 
 
 def validate_timeframe_for_token(token: str, timeframe_label: str) -> None:
-    """Vérifie que le timeframe est autorisé pour le token (si défini en config)."""
+    """Vérifie le timeframe (config symbole ou liste Bitunix → timeframes globaux)."""
     resolve_timeframe_minutes(timeframe_label)
+    key = normalize_token_key(token)
     app = load_app_config()
-    symbol = app.symbols.get(token)
+
+    if is_bitunix_perp(key):
+        return
+
+    symbol = app.symbols.get(key)
     if symbol is None:
         return
     allowed = symbol.timeframes
     if allowed and timeframe_label not in allowed:
         raise ValueError(
-            f"Timeframe {timeframe_label!r} non autorisé pour {token!r} "
+            f"Timeframe {timeframe_label!r} non autorisé pour {key!r} "
             f"(autorisés : {sorted(allowed)})"
         )

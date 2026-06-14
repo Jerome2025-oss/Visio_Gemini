@@ -15,12 +15,14 @@ def capture(
     agent_id: str,
     *,
     wait_ms: int | None = None,
+    viewport: dict[str, int] | None = None,
+    zoom_out_steps: int = 0,
 ) -> Path:
     """
     Capture un graphique TradingView et retourne le chemin du PNG généré.
 
     Args:
-        symbol_tv: Symbole TradingView déjà résolu (ex. ``BINANCE:BTCUSDT``).
+        symbol_tv: Symbole TradingView déjà résolu (ex. ``BITUNIX:BTCUSDT.P``).
         timeframe: Label timeframe (ex. ``4h``).
         layout_id: ID layout TradingView.
         agent_id: Sous-dossier ``captures/{agent_id}/``.
@@ -31,4 +33,9 @@ def capture(
         layout_id=layout_id,
         agent_id=agent_id,
     )
-    return capture_chart(job, wait_ms=wait_ms)
+    return capture_chart(
+        job,
+        wait_ms=wait_ms,
+        viewport=viewport,
+        zoom_out_steps=zoom_out_steps,
+    )

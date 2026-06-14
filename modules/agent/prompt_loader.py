@@ -7,9 +7,9 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 _ROLE_END_MARKER = "Tu dois suivre **EXACTEMENT**"
 _AGENT_FILES = {
-    "agent_a": "agent_a.txt",
-    "agent_b": "agent_b.txt",
-    "agent_c": "agent_c.txt",
+    "agent_Ichimoku": "agent_Ichimoku.txt",
+    "agent_BB": "agent_BB.txt",
+    "agent_EMA": "agent_EMA.txt",
 }
 
 

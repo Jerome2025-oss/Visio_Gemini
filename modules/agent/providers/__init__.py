@@ -6,13 +6,18 @@ from modules.agent.providers.base import (
     VisionProvider,
     VisionResult,
 )
-from modules.agent.providers.registry import analyze_with_strategy, get_provider
+from modules.agent.providers.registry import (
+    analyze_multi_with_strategy,
+    analyze_with_strategy,
+    get_provider,
+)
 
 __all__ = [
     "AnalyzeContext",
     "ProviderError",
     "VisionProvider",
     "VisionResult",
+    "analyze_multi_with_strategy",
     "analyze_with_strategy",
     "get_provider",
 ]

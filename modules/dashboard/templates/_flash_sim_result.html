@@ -1,0 +1,20 @@
+{% if sim_error %}
+<div class="flash-sim__error">⚠️ {{ sim_error }}</div>
+{% elif sim %}
+<div class="flash-sim__out">
+  <span class="badge badge-{{ sim.badge_color }}">{{ sim.badge_label }}</span>
+  <span class="flash-sim__pnl {{ sim.pnl_class }}">{{ sim.pnl_text }}</span>
+  <span class="funnel-card__meta">
+    lev {{ "%g"|format(sim.leverage) }} · TP {{ "%g"|format(sim.tp) }}% · SL {{ "%g"|format(sim.sl) }}%
+    {% if sim.exit_minutes is not none %} · ⏱ {{ sim.exit_minutes }} min{% endif %}
+    {% if sim.provisional %} · PnL flottant (non figé){% endif %}
+  </span>
+</div>
+{% if sim.ret_15m_pct is not none or sim.max_gain_24h_pct is not none %}
+<div class="flash-sim__context funnel-card__meta">
+  {% if sim.ret_15m_pct is not none %}📈 Δ+15m {{ "%+.2f"|format(sim.ret_15m_pct) }}%{% endif %}
+  {% if sim.max_gain_24h_pct is not none %} · 🚀 max 24h {{ "%+.2f"|format(sim.max_gain_24h_pct) }}%{% endif %}
+  <span class="flash-sim__context-note">(mouvement spot, hors levier)</span>
+</div>
+{% endif %}
+{% endif %}

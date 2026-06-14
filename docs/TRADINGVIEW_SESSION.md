@@ -55,6 +55,6 @@ cd ~/Visio_Gemini && source venv/bin/activate
 
 | Agent | Layout ID | Indicateurs |
 |-------|-----------|-------------|
-| agent_a | VLmoQO22 | Ichimoku + RSI |
-| agent_b | guJhPkAj | BB + Volume |
-| agent_c | bl0W3Xyj | EMA50/200 + MACD |
+| agent_Ichimoku | VLmoQO22 | Ichimoku + RSI |
+| agent_BB | guJhPkAj | BB + Volume |
+| agent_EMA | bl0W3Xyj | EMA50/200 + MACD |

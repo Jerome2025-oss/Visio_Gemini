@@ -12,6 +12,7 @@ class PathsConfig:
     storage_state: Path
     captures: Path
     logs: Path
+    bitunix_perps: Path
 
 
 @dataclass(frozen=True)

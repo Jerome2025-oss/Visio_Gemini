@@ -31,3 +31,14 @@ def analyze_with_strategy(
     """Analyse vision via API Mammouth (paramètre strategy ignoré, rétrocompat)."""
     _ = strategy
     return get_provider("mammouth").analyze(image_path, prompt, context=context)
+
+
+def analyze_multi_with_strategy(
+    image_paths: list[Path],
+    prompt: str,
+    *,
+    context: AnalyzeContext | None = None,
+) -> VisionResult:
+    """Analyse multi-image (1 seul appel) via API Mammouth — entonnoir Ichimoku."""
+    provider = get_provider("mammouth")
+    return provider.analyze_multi(image_paths, prompt, context=context)
