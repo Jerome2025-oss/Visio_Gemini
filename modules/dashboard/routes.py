@@ -16,6 +16,12 @@ from pydantic import BaseModel, Field
 from modules.analyse.funnel import _decision_color, format_score_fr, run_funnel
 from modules.analyse.orchestrator import run_batch
 from modules.analyse.results import AnalysisResult
+from modules.backtest.latency_sim import (
+    DEFAULT_LATENCY_SECONDS,
+    PRICE_GRANULARITY,
+    compare_latency_modes,
+    klines_from_api,
+)
 from modules.config import load_app_config
 from modules.dashboard.store import add_run, latest
 from modules.selection.bitunix_symbols import normalize_token_key
@@ -246,6 +252,7 @@ def _flash_view_with_btc(row: db_manager.AnalyseRow, raw: sqlite3.Row) -> dict:
     """Modèle d'affichage FLASH enrichi du contexte BTC (fonction nouvelle)."""
     view = _flash_view(row)
     btc = btc_context.read_btc_fields_from_row(raw)
+    flash_btc = _read_btc_flash_fields(raw)
     score = btc.get("btc_context_score")
     view.update(
         {
@@ -255,6 +262,12 @@ def _flash_view_with_btc(row: db_manager.AnalyseRow, raw: sqlite3.Row) -> dict:
             "btc_h4_snapshot": btc.get("btc_h4_snapshot"),
             "btc_badge_color": btc_context.btc_badge_color(score),
             "btc_badge_label": btc_context.btc_badge_label(score),
+            "btc_etat": flash_btc["btc_etat"],
+            "btc_etat_voyant": flash_btc["btc_etat_voyant"],
+            "btc_etat_badge_label": db_manager.btc_etat_badge_label(flash_btc["btc_etat"]),
+            "btc_etat_badge_color": db_manager.btc_etat_badge_color(flash_btc["btc_etat"]),
+            "btc_change_1h": flash_btc["btc_change_1h"],
+            "btc_change_5m": flash_btc["btc_change_5m"],
         }
     )
     return view
@@ -562,6 +575,66 @@ def btc_trend_data(period: str = "30d") -> JSONResponse:
     return JSONResponse(_btc_trend_payload(period_norm))
 
 
+def _normalize_backtest_etats(
+    *,
+    btc_ok: bool = True,
+    btc_reprise: bool = True,
+    btc_faible: bool = True,
+) -> set[str]:
+    """États BTC inclus dans le backtest (cases cochées)."""
+    out: set[str] = set()
+    if btc_ok:
+        out.add(db_manager.BTC_ETAT_OK)
+    if btc_reprise:
+        out.add(db_manager.BTC_ETAT_REPRISE)
+    if btc_faible:
+        out.add(db_manager.BTC_ETAT_FAIBLE)
+    return out
+
+
+def _read_btc_flash_fields(row: sqlite3.Row) -> dict[str, Any]:
+    keys = row.keys()
+    etat_raw = row["btc_etat"] if "btc_etat" in keys else None
+    etat = db_manager.normalize_btc_etat(etat_raw)
+    return {
+        "btc_change_1h": row["btc_change_1h"] if "btc_change_1h" in keys else None,
+        "btc_change_5m": row["btc_change_5m"] if "btc_change_5m" in keys else None,
+        "btc_etat": etat,
+        "btc_etat_voyant": db_manager.btc_etat_voyant(etat_raw),
+    }
+
+
+def _passes_btc_etat_backtest(row: sqlite3.Row, etats: set[str]) -> bool:
+    """Filtre voyant BTC flash — ``UNKNOWN`` exclus de la simulation."""
+    if not etats:
+        return False
+    fields = _read_btc_flash_fields(row)
+    if fields["btc_etat"] == db_manager.BTC_ETAT_UNKNOWN:
+        return False
+    return fields["btc_etat"] in etats
+
+
+def _include_flash_in_backtest_list(row: sqlite3.Row, etats: set[str]) -> bool:
+    """Liste historique : ``UNKNOWN`` toujours visible ; états connus selon cases."""
+    fields = _read_btc_flash_fields(row)
+    if fields["btc_etat"] == db_manager.BTC_ETAT_UNKNOWN:
+        return True
+    return _passes_btc_etat_backtest(row, etats)
+
+
+def _include_flash_in_backtest_sim(flash: dict[str, Any], etats: set[str]) -> bool:
+    """Simulation batch : filtre voyant optionnel.
+
+    - etats vide (aucune case cochée) → tous les flashs visibles sont simulés,
+      y compris btc_etat = UNKNOWN.
+    - etats non vide → filtre strict : seuls les flashs dont btc_etat est dans
+      la sélection. UNKNOWN n'étant ni OK/REPRISE/FAIBLE, il est exclu.
+    """
+    if not etats:
+        return True
+    return flash.get("btc_etat") in etats
+
+
 def _normalize_backtest_filtres(filtres: list[str] | str | None) -> list[str]:
     """Normalise les filtres backtest : [] = tous, sinon sous-ensemble de ichimoku/btc."""
     if filtres is None:
@@ -597,9 +670,11 @@ def _fetch_backtest_flashes(
     conn: sqlite3.Connection,
     *,
     filtres: list[str] | None = None,
+    etats: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Liste brute des flashs Ichimoku pour le backtest (sans simulation)."""
     btc_context.ensure_btc_columns(conn)
+    active_etats = etats if etats is not None else _normalize_backtest_etats()
     rows = conn.execute(
         """
         SELECT * FROM analyses_ichimoku
@@ -613,19 +688,24 @@ def _fetch_backtest_flashes(
         rows = [r for r in rows if _passes_ichimoku_backtest(r)]
     if "btc" in active:
         rows = [r for r in rows if _passes_btc_backtest(r)]
+    rows = [r for r in rows if _include_flash_in_backtest_list(r, active_etats)]
     flashes: list[dict[str, Any]] = []
     for row in rows:
         btc = btc_context.read_btc_fields_from_row(row)
+        flash_btc = _read_btc_flash_fields(row)
         flashes.append(
             {
                 "id": int(row["id"]),
                 "token": str(row["token"]),
                 "flash_ts": row["signal_time_utc"],
+                "signal_time_utc": row["signal_time_utc"],
+                "analysis_time_utc": row["analysis_time_utc"],
                 "score": row["score_ia"],
                 "score_display": format_score_fr(row["score_ia"]),
                 "decision": row["decision_ia"],
                 "btc_score": btc.get("btc_context_score"),
                 "btc_badge": btc_context.btc_badge_color(btc.get("btc_context_score")),
+                **flash_btc,
             }
         )
     return flashes
@@ -663,6 +743,55 @@ def _call_simulate_one(
     if not payload.get("ok"):
         return None
     return payload
+
+
+def _call_backtest_klines(
+    flash_id: int,
+    *,
+    hours_after: int = 24,
+) -> dict[str, Any] | None:
+    """Proxy vers bitunix ``/api/backtest/klines/{flash_id}``."""
+    url = f"{BITUNIX_API_URL}/api/backtest/klines/{flash_id}"
+    try:
+        resp = httpx.get(url, params={"hours_after": hours_after}, timeout=45.0)
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    if not payload.get("ok"):
+        return None
+    return payload
+
+
+def _fetch_klines_for_flash(
+    *,
+    symbol: str,
+    flash_ts: str,
+    leverage: float,
+    tp: float,
+    sl: float,
+) -> list | None:
+    """Récupère les bougies 1m via API bitunix (résolution symbol + flash_ts)."""
+    sim = _call_simulate_one(
+        symbol=symbol,
+        flash_ts=flash_ts,
+        leverage=leverage,
+        tp=tp,
+        sl=sl,
+    )
+    if sim is None:
+        return None
+    flash_id = sim.get("flash_id")
+    if flash_id is None:
+        return None
+    payload = _call_backtest_klines(int(flash_id), hours_after=24)
+    if payload is None:
+        return None
+    return klines_from_api(payload.get("candles") or [])
 
 
 def _format_duration_minutes(minutes: int | None) -> str:
@@ -708,6 +837,8 @@ def _backtest_row_from_sim(
             "token": flash["token"],
             "flash_ts": flash.get("flash_ts") or "",
             "score": flash.get("score"),
+            "btc_etat": flash.get("btc_etat"),
+            "btc_etat_voyant": flash.get("btc_etat_voyant", "—"),
             "resultat": "ERR",
             "pnl_pct": "—",
             "duree": "—",
@@ -716,10 +847,12 @@ def _backtest_row_from_sim(
     code, provisional = _map_backtest_resultat(payload)
     pnl = payload.get("pnl_pct")
     pnl_float = float(pnl) if pnl is not None else None
-    return {
+    row: dict[str, Any] = {
         "token": flash["token"],
         "flash_ts": flash.get("flash_ts") or payload.get("flash_ts") or "",
         "score": flash.get("score"),
+        "btc_etat": flash.get("btc_etat"),
+        "btc_etat_voyant": flash.get("btc_etat_voyant", "—"),
         "resultat": code,
         "pnl_pct": _format_pnl_pct(
             pnl_float,
@@ -732,6 +865,31 @@ def _backtest_row_from_sim(
         if pnl_float is not None and code in ("TP", "SL", "EN_COURS")
         else None,
     }
+    for key in (
+        "flash_id",
+        "tp_price",
+        "sl_price",
+        "liq_price",
+        "exit_price",
+        "exit_at_ms",
+        "exit_minutes",
+        "outcome",
+        "status",
+        "entry_price",
+        "pnl_pct_raw",
+    ):
+        if key in payload and payload[key] is not None:
+            row[key] = payload[key]
+    if pnl_float is not None:
+        row["pnl_pct_raw"] = pnl_float
+    return row
+
+
+def _win_rate_pct(tp: int, sl: int) -> str:
+    closed = tp + sl
+    if closed == 0:
+        return "—"
+    return f"{round(tp / closed * 100)}%"
 
 
 def _compute_backtest_stats(resultats: list[dict[str, Any]]) -> dict[str, Any]:
@@ -754,14 +912,39 @@ def _compute_backtest_stats(resultats: list[dict[str, Any]]) -> dict[str, Any]:
         r["resultat"] == "EN_COURS" and r.get("_pnl_all") is not None for r in resultats
     )
 
+    par_etat: dict[str, dict[str, Any]] = {}
+    for etat, emoji, label in (
+        (db_manager.BTC_ETAT_OK, "🟢", "OK"),
+        (db_manager.BTC_ETAT_REPRISE, "✅", "REPRISE"),
+        (db_manager.BTC_ETAT_FAIBLE, "🔴", "FAIBLE"),
+    ):
+        subset = [r for r in resultats if r.get("btc_etat") == etat]
+        sub_tp = sum(1 for r in subset if r["resultat"] == "TP")
+        sub_sl = sum(1 for r in subset if r["resultat"] == "SL")
+        sub_pnls = [r["_pnl_all"] for r in subset if r.get("_pnl_all") is not None]
+        sub_pnl_sum = sum(sub_pnls) if sub_pnls else None
+        sub_has_live = any(
+            r["resultat"] == "EN_COURS" and r.get("_pnl_all") is not None for r in subset
+        )
+        par_etat[etat] = {
+            "emoji": emoji,
+            "label": label,
+            "n": len(subset),
+            "wr": _win_rate_pct(sub_tp, sub_sl),
+            "pnl": _format_pnl_pct(sub_pnl_sum, provisional=sub_has_live)
+            if sub_pnl_sum is not None
+            else "—",
+        }
+
     return {
         "total": total,
         "tp": tp,
-        "tp_pct": _pct(tp),
         "sl": sl,
+        "tp_pct": _pct(tp),
         "sl_pct": _pct(sl),
         "en_cours": en_cours,
         "clo_24h": clo,
+        "wr": _win_rate_pct(tp, sl),
         "pnl_realise": _format_pnl_pct(pnl_realise_sum)
         if pnl_realise_sum is not None
         else "—",
@@ -771,6 +954,7 @@ def _compute_backtest_stats(resultats: list[dict[str, Any]]) -> dict[str, Any]:
         )
         if pnl_total_sum is not None
         else "—",
+        "par_etat": par_etat,
     }
 
 
@@ -779,6 +963,20 @@ class BacktestRunRequest(BaseModel):
     tp: float = Field(default=1.4, ge=0.1, le=50.0)
     sl: float = Field(default=2.0, ge=0.1, le=20.0)
     filtres: list[str] = Field(default_factory=list)
+    btc_ok: bool = True
+    btc_reprise: bool = True
+    btc_faible: bool = True
+
+
+class BacktestLatencyRunRequest(BaseModel):
+    leverage: float = Field(default=30.0, ge=1.0, le=50.0)
+    tp: float = Field(default=1.4, ge=0.1, le=50.0)
+    sl: float = Field(default=2.0, ge=0.1, le=20.0)
+    latency_seconds: int = Field(default=DEFAULT_LATENCY_SECONDS, ge=0, le=300)
+    filtres: list[str] = Field(default_factory=list)
+    btc_ok: bool = True
+    btc_reprise: bool = True
+    btc_faible: bool = True
 
 
 @router.get("/backtest", response_class=HTMLResponse)
@@ -788,13 +986,21 @@ def backtest_page(
     leverage: float = 30.0,
     tp: float = 1.4,
     sl: float = 2.0,
+    btc_ok: bool = Query(default=True),
+    btc_reprise: bool = Query(default=True),
+    btc_faible: bool = Query(default=True),
 ) -> HTMLResponse:
     """Page backtest historique — liste brute sans simulation au chargement."""
     filtres_norm = _normalize_backtest_filtres(filtres)
+    etats = _normalize_backtest_etats(
+        btc_ok=btc_ok,
+        btc_reprise=btc_reprise,
+        btc_faible=btc_faible,
+    )
     templates = request.app.state.templates
     conn = db_manager.connect()
     try:
-        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm)
+        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm, etats=etats)
     finally:
         conn.close()
     return templates.TemplateResponse(
@@ -807,6 +1013,9 @@ def backtest_page(
             "leverage": leverage,
             "tp": tp,
             "sl": sl,
+            "btc_ok": btc_ok,
+            "btc_reprise": btc_reprise,
+            "btc_faible": btc_faible,
         },
     )
 
@@ -815,14 +1024,21 @@ def backtest_page(
 def backtest_run(body: BacktestRunRequest) -> JSONResponse:
     """Simule tous les flashs filtrés via bitunix simulate_one (batch)."""
     filtres_norm = _normalize_backtest_filtres(body.filtres)
+    etats = _normalize_backtest_etats(
+        btc_ok=body.btc_ok,
+        btc_reprise=body.btc_reprise,
+        btc_faible=body.btc_faible,
+    )
     conn = db_manager.connect()
     try:
-        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm)
+        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm, etats=etats)
     finally:
         conn.close()
 
     raw_rows: list[dict[str, Any]] = []
     for flash in flashes:
+        if not _include_flash_in_backtest_sim(flash, etats):
+            continue
         ts = flash.get("flash_ts")
         if not ts:
             raw_rows.append(_backtest_row_from_sim(flash, None))
@@ -841,9 +1057,142 @@ def backtest_run(body: BacktestRunRequest) -> JSONResponse:
     for r in raw_rows:
         c = dict(r)
         c.pop("_pnl_raw", None)
+        c.pop("_pnl_all", None)
         resultats.append(c)
 
     return JSONResponse({"resultats": resultats, "stats": stats})
+
+
+@router.get("/backtest/chart")
+def backtest_chart_data(
+    symbol: Annotated[str, Query(min_length=1)],
+    flash_ts: Annotated[str, Query(min_length=1)],
+    leverage: float = Query(20.0, ge=1, le=50),
+    tp: float = Query(2.5, ge=0.1, le=50),
+    sl: float = Query(1.5, ge=0.1, le=20),
+    hours_after: int = Query(24, ge=1, le=48),
+) -> JSONResponse:
+    """Klines + niveaux TP/SL pour le graphique backtest (proxy API bitunix)."""
+    sim = _call_simulate_one(
+        symbol=symbol,
+        flash_ts=flash_ts,
+        leverage=leverage,
+        tp=tp,
+        sl=sl,
+    )
+    if sim is None:
+        return JSONResponse(
+            {"ok": False, "error": "Simulation indisponible (API bitunix)"},
+            status_code=502,
+        )
+    flash_id = sim.get("flash_id")
+    if flash_id is None:
+        return JSONResponse(
+            {"ok": False, "error": "FLASH introuvable sur l'API bitunix"},
+            status_code=404,
+        )
+    klines = _call_backtest_klines(int(flash_id), hours_after=hours_after)
+    if klines is None:
+        return JSONResponse(
+            {"ok": False, "error": "Klines indisponibles"},
+            status_code=502,
+        )
+    return JSONResponse({"ok": True, "sim": sim, "klines": klines})
+
+
+@router.get("/backtest/latency", response_class=HTMLResponse)
+def backtest_latency_page(
+    request: Request,
+    filtres: list[str] = Query(default=[]),
+    leverage: float = 30.0,
+    tp: float = 1.4,
+    sl: float = 2.0,
+    latency_seconds: int = DEFAULT_LATENCY_SECONDS,
+    btc_ok: bool = Query(default=True),
+    btc_reprise: bool = Query(default=True),
+    btc_faible: bool = Query(default=True),
+) -> HTMLResponse:
+    """Comparaison backtest optimiste (analysis_time) vs réaliste (+latence)."""
+    filtres_norm = _normalize_backtest_filtres(filtres)
+    etats = _normalize_backtest_etats(
+        btc_ok=btc_ok,
+        btc_reprise=btc_reprise,
+        btc_faible=btc_faible,
+    )
+    templates = request.app.state.templates
+    conn = db_manager.connect()
+    try:
+        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm, etats=etats)
+    finally:
+        conn.close()
+    return templates.TemplateResponse(
+        request,
+        "backtest_latency.html",
+        {
+            "request": request,
+            "flashes": flashes,
+            "filtres": filtres_norm,
+            "leverage": leverage,
+            "tp": tp,
+            "sl": sl,
+            "latency_seconds": latency_seconds,
+            "btc_ok": btc_ok,
+            "btc_reprise": btc_reprise,
+            "btc_faible": btc_faible,
+            "price_granularity": PRICE_GRANULARITY,
+        },
+    )
+
+
+@router.post("/backtest/latency/run")
+def backtest_latency_run(body: BacktestLatencyRunRequest) -> JSONResponse:
+    """Double simulation latence pour tous les flashs filtrés."""
+    filtres_norm = _normalize_backtest_filtres(body.filtres)
+    etats = _normalize_backtest_etats(
+        btc_ok=body.btc_ok,
+        btc_reprise=body.btc_reprise,
+        btc_faible=body.btc_faible,
+    )
+    conn = db_manager.connect()
+    try:
+        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm, etats=etats)
+    finally:
+        conn.close()
+
+    sim_signals: list[dict[str, Any]] = []
+    for flash in flashes:
+        if not _include_flash_in_backtest_sim(flash, etats):
+            continue
+        sim_signals.append(flash)
+
+    klines_by_key: dict[str, list] = {}
+    for flash in sim_signals:
+        token = str(flash["token"])
+        signal_ts = str(flash.get("signal_time_utc") or flash.get("flash_ts") or "")
+        if not signal_ts:
+            continue
+        key = f"{token}|{signal_ts}"
+        if key in klines_by_key:
+            continue
+        rows = _fetch_klines_for_flash(
+            symbol=token,
+            flash_ts=signal_ts,
+            leverage=body.leverage,
+            tp=body.tp,
+            sl=body.sl,
+        )
+        if rows:
+            klines_by_key[key] = rows
+
+    report = compare_latency_modes(
+        sim_signals,
+        klines_by_key,
+        leverage=body.leverage,
+        tp_pct=body.tp,
+        sl_pct=body.sl,
+        latency_seconds=body.latency_seconds,
+    )
+    return JSONResponse(report)
 
 
 def register_png_url_filter(templates, captures_dir: Path) -> None:

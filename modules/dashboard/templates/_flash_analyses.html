@@ -54,6 +54,7 @@
     <span class="badge badge-{{ a.decision_color }}">📌 {{ a.decision }}</span>
     {% endif %}
     <span class="badge badge-{{ a.btc_badge_color }}" title="Contexte macro BTC H4{% if a.btc_tenkan_slope %} · Tenkan {{ a.btc_tenkan_slope }}{% endif %}{% if a.btc_h4_snapshot %} · {{ a.btc_h4_snapshot }}{% endif %}">{{ a.btc_badge_label }}</span>
+    <span class="badge badge-{{ a.btc_etat_badge_color }}" title="Voyant BTC flash Telegram{% if a.btc_change_1h is not none %} · Δ1h {{ a.btc_change_1h }}%{% endif %}{% if a.btc_change_5m is not none %} · Δ5m {{ a.btc_change_5m }}%{% endif %}">{{ a.btc_etat_badge_label }}</span>
     {% if a.pnl is not none %}
     <span class="badge badge-{{ a.pnl_color }}">💰 PnL {{ "%+.2f"|format(a.pnl) }}{% if a.exit_type %} · {{ a.exit_type }}{% endif %}</span>
     {% elif a.exit_type %}

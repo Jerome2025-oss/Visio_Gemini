@@ -86,6 +86,9 @@ class AnalyseRow:
     exit_type: str | None
     date_jour: str
     chart_paths: str | None = None
+    btc_change_1h: float | None = None
+    btc_change_5m: float | None = None
+    btc_etat: str | None = None
 
     @classmethod
     def from_sqlite(cls, row: sqlite3.Row) -> "AnalyseRow":
@@ -102,6 +105,9 @@ class AnalyseRow:
             exit_type=row["exit_type"],
             date_jour=row["date_jour"],
             chart_paths=row["chart_paths"] if "chart_paths" in keys else None,
+            btc_change_1h=row["btc_change_1h"] if "btc_change_1h" in keys else None,
+            btc_change_5m=row["btc_change_5m"] if "btc_change_5m" in keys else None,
+            btc_etat=row["btc_etat"] if "btc_etat" in keys else None,
         )
 
     @property
@@ -148,6 +154,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE analyses_ichimoku ADD COLUMN chart_paths TEXT")
         conn.commit()
         logger.info("🧱 Migration : colonne chart_paths ajoutée (données préservées).")
+    for name, col_type in _BTC_FLASH_COLUMNS:
+        if not _column_exists(conn, "analyses_ichimoku", name):
+            conn.execute(f"ALTER TABLE analyses_ichimoku ADD COLUMN {name} {col_type}")
+            conn.commit()
+            logger.info("🧱 Migration : colonne %s ajoutée (données préservées).", name)
     _migrate_scores_from_recap(conn)
 
 
@@ -184,6 +195,18 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
 
 BACKFILL_VISUEL_SOURCE = "backfill_visuel"
+
+BTC_ETAT_OK = "OK"
+BTC_ETAT_REPRISE = "REPRISE"
+BTC_ETAT_FAIBLE = "FAIBLE"
+BTC_ETAT_UNKNOWN = "UNKNOWN"
+BTC_ETATS_TRADABLE = frozenset({BTC_ETAT_OK, BTC_ETAT_REPRISE, BTC_ETAT_FAIBLE})
+
+_BTC_FLASH_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("btc_change_1h", "REAL"),
+    ("btc_change_5m", "REAL"),
+    ("btc_etat", "TEXT"),
+)
 
 
 def insert_btc_scan(
@@ -232,6 +255,43 @@ def fetch_btc_scans(
     ).fetchall()
 
 
+def normalize_btc_etat(value: str | None) -> str:
+    """Normalise ``btc_etat`` — anciens flashs sans ligne → ``UNKNOWN``."""
+    if value in BTC_ETATS_TRADABLE:
+        return value
+    return BTC_ETAT_UNKNOWN
+
+
+def btc_etat_voyant(etat: str | None) -> str:
+    """Emoji voyant pour l'affichage backtest."""
+    mapping = {
+        BTC_ETAT_OK: "🟢",
+        BTC_ETAT_REPRISE: "✅",
+        BTC_ETAT_FAIBLE: "🔴",
+    }
+    return mapping.get(normalize_btc_etat(etat), "—")
+
+
+def btc_etat_badge_label(etat: str | None) -> str:
+    """Libellé pastille voyant BTC flash (Telegram)."""
+    labels = {
+        BTC_ETAT_OK: "🟢 BTC OK",
+        BTC_ETAT_REPRISE: "✅ BTC REPRISE",
+        BTC_ETAT_FAIBLE: "🔴 BTC FAIBLE",
+    }
+    return labels.get(normalize_btc_etat(etat), "BTC voyant —")
+
+
+def btc_etat_badge_color(etat: str | None) -> str:
+    """Couleur pastille voyant BTC flash."""
+    colors = {
+        BTC_ETAT_OK: "green",
+        BTC_ETAT_REPRISE: "yellow",
+        BTC_ETAT_FAIBLE: "red",
+    }
+    return colors.get(normalize_btc_etat(etat), "muted")
+
+
 def insert_analyse(
     conn: sqlite3.Connection,
     *,
@@ -243,6 +303,9 @@ def insert_analyse(
     chart_paths: list[str] | None = None,
     analysis_time_utc: str | None = None,
     date_jour: str | None = None,
+    btc_change_1h: float | None = None,
+    btc_change_5m: float | None = None,
+    btc_etat: str | None = None,
 ) -> int:
     """Enregistre une nouvelle analyse IA et retourne l'``id`` créé.
 
@@ -258,8 +321,9 @@ def insert_analyse(
         """
         INSERT INTO analyses_ichimoku
             (token, signal_time_utc, analysis_time_utc, score_ia,
-             decision_ia, recap_complet, pnl_final, exit_type, date_jour, chart_paths)
-        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+             decision_ia, recap_complet, pnl_final, exit_type, date_jour, chart_paths,
+             btc_change_1h, btc_change_5m, btc_etat)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
         """,
         (
             token,
@@ -270,6 +334,9 @@ def insert_analyse(
             recap_complet,
             day,
             charts_json,
+            btc_change_1h,
+            btc_change_5m,
+            btc_etat,
         ),
     )
     conn.commit()

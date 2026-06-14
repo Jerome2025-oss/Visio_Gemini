@@ -825,6 +825,159 @@ th {
   background: rgba(59, 130, 246, 0.05);
 }
 
+.backtest-table tbody tr.is-selected {
+  background: rgba(56, 139, 253, 0.15);
+  outline: 1px solid rgba(56, 139, 253, 0.35);
+}
+
+.bt-token-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #58a6ff;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(88, 166, 255, 0.35);
+  text-underline-offset: 2px;
+}
+
+.bt-token-link:hover {
+  color: #79c0ff;
+  text-decoration-color: rgba(121, 192, 255, 0.6);
+}
+
+.bt-chart-panel {
+  border-left: 3px solid #ef4444;
+}
+
+.bt-chart-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.bt-chart-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.bt-chart-meta {
+  margin: 0 0 12px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.bt-chart-wrap {
+  position: relative;
+  height: 280px;
+  margin-bottom: 8px;
+}
+
+.bt-chart-wrap--vol {
+  height: 100px;
+}
+
+/* ── Backtest latence (optimiste vs réaliste) ─────────────────────── */
+.latency-notice {
+  border-left: 3px solid #d29922;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.latency-notice code {
+  color: #e2e8f0;
+  font-size: 0.85em;
+}
+
+.latency-meta-note {
+  margin-bottom: 1rem;
+}
+
+.latency-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.latency-stat-card {
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.latency-stat-card--optimistic {
+  border-left: 3px solid #3fb950;
+}
+
+.latency-stat-card--realistic {
+  border-left: 3px solid #d29922;
+}
+
+.latency-stat-card h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.latency-stat-dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem 1rem;
+  margin: 0;
+}
+
+.latency-stat-dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.latency-stat-dl dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.latency-stat-dl dd {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.latency-impact-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+  border-radius: 8px;
+  background: rgba(248, 81, 73, 0.08);
+  border: 1px solid rgba(248, 81, 73, 0.25);
+}
+
+.latency-impact-box__label {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.latency-impact-box__value {
+  font-size: 1rem;
+  color: #fca5a5;
+}
+
+.latency-section-title {
+  margin: 1.25rem 0 0.65rem;
+  font-size: 0.95rem;
+}
+
+.backtest-table tr.latency-row-flipped {
+  background: rgba(248, 81, 73, 0.06);
+}
+
 .backtest-table .bt-pnl.pnl-up {
   color: #00ff88;
   font-weight: 700;
@@ -856,6 +1009,44 @@ th {
 .backtest-table .bt-pnl.pnl-neutral.pnl-live {
   font-style: italic;
   animation: backtest-pnl-pulse 2s ease-in-out infinite;
+}
+
+.backtest-filtre--etat {
+  flex-wrap: wrap;
+}
+
+.backtest-stats--etat {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.bt-stat-etat-row,
+.bt-stat-etat-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  font-size: 0.88rem;
+}
+
+.bt-stat-etat-total {
+  margin-top: 0.35rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--border);
+  font-weight: 600;
+}
+
+.bt-stat-etat-row__label {
+  min-width: 8.5rem;
+  color: #e2e8f0;
+}
+
+.bt-stat-etat-row__val {
+  color: var(--muted);
 }
 
 /* ── Simulation backtest (FLASH × bitunix) ─────────────────────────── */

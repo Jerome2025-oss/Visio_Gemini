@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Visio Gemini — Backtest historique</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -17,6 +18,7 @@
         <a href="/">Dashboard</a>
         <a href="/btc-trend">BTC H4</a>
         <a href="/backtest" class="is-active">Backtest</a>
+        <a href="/backtest/latency">Latence</a>
         <a href="/manu">MANU</a>
       </nav>
     </header>
@@ -47,6 +49,21 @@
             <span class="backtest-toggle__face">BTC H4</span>
           </label>
         </div>
+        <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="État BTC flash">
+          <span class="backtest-filtre-label">Voyant BTC</span>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="filtre-btc-ok"{% if btc_ok %} checked{% endif %}>
+            <span class="backtest-toggle__face">🟢 BTC OK</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="filtre-btc-reprise"{% if btc_reprise %} checked{% endif %}>
+            <span class="backtest-toggle__face">✅ BTC EN REPRISE</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="filtre-btc-faible"{% if btc_faible %} checked{% endif %}>
+            <span class="backtest-toggle__face">🔴 BTC FAIBLE</span>
+          </label>
+        </div>
         <button type="button" id="bt-run" class="backtest-run-btn">⚡ Lancer la simulation sur tout l'historique</button>
         <span id="bt-spinner" class="funnel-card__meta backtest-spinner" hidden>simulation en cours…</span>
       </div>
@@ -68,6 +85,7 @@
               <th>Token</th>
               <th>Date flash</th>
               <th>Score IA</th>
+              <th>Voyant BTC</th>
               <th>BTC score</th>
               <th>Résultat</th>
               <th>Durée</th>
@@ -77,23 +95,39 @@
           <tbody id="bt-tbody">
             {% for f in flashes %}
             <tr data-token="{{ f.token }}" data-flash-ts="{{ f.flash_ts or '' }}">
-              <td>{{ f.token }}</td>
+              <td><button type="button" class="bt-token-link" title="Afficher le graphique">{{ f.token }} 📈</button></td>
               <td>{{ f.flash_ts or '—' }}</td>
               <td>{% if f.score_display %}{{ f.score_display }}/10{% else %}—{% endif %}</td>
+              <td>{{ f.btc_etat_voyant or '—' }}</td>
               <td>{% if f.btc_score is not none %}<span class="badge badge-{{ f.btc_badge }}">{{ f.btc_score }}/10</span>{% else %}—{% endif %}</td>
               <td class="bt-result"><span class="badge badge-muted">—</span></td>
               <td class="bt-duree">—</td>
               <td class="bt-pnl">—</td>
             </tr>
             {% else %}
-            <tr><td colspan="7" class="empty">Aucun flash dans cette sélection.</td></tr>
+            <tr><td colspan="8" class="empty">Aucun flash dans cette sélection.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </section>
+
+    <section class="panel bt-chart-panel" id="bt-chart-section" hidden aria-labelledby="bt-chart-heading">
+      <div class="bt-chart-header">
+        <h2 id="bt-chart-heading">Graphique</h2>
+        <span class="badge badge-muted" id="bt-chart-symbol">—</span>
+      </div>
+      <p id="bt-chart-meta" class="bt-chart-meta"></p>
+      <div class="bt-chart-wrap">
+        <canvas id="bt-price-chart" height="280"></canvas>
+      </div>
+      <div class="bt-chart-wrap bt-chart-wrap--vol">
+        <canvas id="bt-volume-chart" height="100"></canvas>
+      </div>
+    </section>
   </div>
 
+  <script src="/static/backtest_chart.js" defer></script>
   <script id="bt-flashes" type="application/json">{{ flashes | tojson }}</script>
   <script>
     let currentFiltres = {{ filtres | tojson }};
@@ -149,6 +183,19 @@
       panel.hidden = false;
       const pnlRealiseCls = pnlStatsClass(stats.pnl_realise);
       const pnlTotalCls = pnlStatsClass(stats.pnl_total);
+      const parEtat = stats.par_etat || {};
+      const etatRows = ["OK", "REPRISE", "FAIBLE"].map((key) => {
+        const row = parEtat[key];
+        if (!row) return "";
+        const pnlCls = pnlStatsClass(row.pnl);
+        return `
+          <div class="bt-stat-etat-row">
+            <span class="bt-stat-etat-row__label">${row.emoji} ${row.label}</span>
+            <span class="bt-stat-etat-row__val">WR ${row.wr}</span>
+            <span class="bt-stat-etat-row__val ${pnlCls}">PnL ${row.pnl}</span>
+            <span class="bt-stat-etat-row__val">${row.n} flash(s)</span>
+          </div>`;
+      }).join("");
       el.innerHTML = `
         <div class="backtest-stats">
           <div class="backtest-stats__group backtest-stats__group--counts">
@@ -161,6 +208,15 @@
           <div class="backtest-stats__group backtest-stats__group--pnl">
             ${statPill("PnL réalisé", stats.pnl_realise, pnlRealiseCls)}
             ${statPill("PnL total", stats.pnl_total, pnlTotalCls)}
+          </div>
+        </div>
+        <div class="backtest-stats backtest-stats--etat">
+          ${etatRows}
+          <div class="bt-stat-etat-total">
+            <span class="bt-stat-etat-row__label">TOTAL filtré</span>
+            <span class="bt-stat-etat-row__val">WR ${stats.wr || "—"}</span>
+            <span class="bt-stat-etat-row__val ${pnlTotalCls}">PnL ${stats.pnl_total}</span>
+            <span class="bt-stat-etat-row__val">${stats.total} flash(s)</span>
           </div>
         </div>
       `;
@@ -182,6 +238,10 @@
         pnlEl.className = "bt-pnl " + pnlClass(row);
       });
       if (data.stats) renderStats(data.stats);
+      if (window.BacktestChart) {
+        BacktestChart.updateCache(data.resultats || []);
+        BacktestChart.reloadSelected();
+      }
     }
 
     function getActiveFiltres() {
@@ -193,13 +253,25 @@
       return out;
     }
 
+    function getActiveEtats() {
+      return {
+        btc_ok: document.getElementById("filtre-btc-ok").checked,
+        btc_reprise: document.getElementById("filtre-btc-reprise").checked,
+        btc_faible: document.getElementById("filtre-btc-faible").checked,
+      };
+    }
+
     function reloadWithFiltres() {
       const filtres = getActiveFiltres();
       currentFiltres = filtres;
+      const etats = getActiveEtats();
       const params = new URLSearchParams();
       params.set("leverage", document.getElementById("bt-leverage").value);
       params.set("tp", parseFloat(document.getElementById("bt-tp").value).toFixed(1));
       params.set("sl", parseFloat(document.getElementById("bt-sl").value).toFixed(1));
+      params.set("btc_ok", etats.btc_ok ? "true" : "false");
+      params.set("btc_reprise", etats.btc_reprise ? "true" : "false");
+      params.set("btc_faible", etats.btc_faible ? "true" : "false");
       filtres.forEach((f) => params.append("filtres", f));
       window.location.href = "/backtest?" + params.toString();
     }
@@ -222,6 +294,9 @@
     document.getElementById("filtre-tous").addEventListener("change", () => onFiltreChange("tous"));
     document.getElementById("filtre-ichimoku").addEventListener("change", () => onFiltreChange("ichimoku"));
     document.getElementById("filtre-btc").addEventListener("change", () => onFiltreChange("btc"));
+    document.getElementById("filtre-btc-ok").addEventListener("change", reloadWithFiltres);
+    document.getElementById("filtre-btc-reprise").addEventListener("change", reloadWithFiltres);
+    document.getElementById("filtre-btc-faible").addEventListener("change", reloadWithFiltres);
 
     document.getElementById("bt-run").addEventListener("click", async () => {
       const btn = document.getElementById("bt-run");
@@ -237,6 +312,7 @@
             tp: parseFloat(document.getElementById("bt-tp").value),
             sl: parseFloat(document.getElementById("bt-sl").value),
             filtres: getActiveFiltres(),
+            ...getActiveEtats(),
           }),
         });
         if (!resp.ok) throw new Error("HTTP " + resp.status);

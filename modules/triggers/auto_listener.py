@@ -54,6 +54,17 @@ _TOKEN_RE = re.compile(r"FLASH\s*[—–\-:]\s*([A-Z0-9]{2,20}USDT)", re.IGNOREC
 _SIGNAL_TIME_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*UTC", re.IGNORECASE
 )
+# « 📊 BTC Δ1h +1.2% | Δ5m -0.3% 🟢 »
+_BTC_FLASH_LINE_RE = re.compile(
+    r"BTC\s*[ΔD]1h\s*([+-]?\d+(?:[.,]\d+)?)\s*%\s*\|\s*[ΔD]5m\s*([+-]?\d+(?:[.,]\d+)?)\s*%\s*([🟢✅🔴])",
+    re.IGNORECASE,
+)
+_VOYANT_TO_ETAT: dict[str, str] = {
+    "🟢": "OK",
+    "✅": "REPRISE",
+    "🔴": "FAIBLE",
+}
+BTC_ETAT_UNKNOWN = "UNKNOWN"
 # Décision normalisée à partir du texte Gemini.
 _DECISION_RE = re.compile(
     r"D[ÉE]CISION\s*[:：]\s*.*?(TRADE\s+LONG|TRADE\s+SHORT|PAS\s+DE\s+TRADE)",
@@ -89,6 +100,29 @@ def extract_signal_time(text: str) -> str | None:
     if not match:
         return None
     return match.group(1).strip()
+
+
+def parse_btc_flash_metrics(
+    text: str | None,
+) -> tuple[float | None, float | None, str]:
+    """Parse la ligne BTC du flash Telegram.
+
+    Retourne ``(btc_change_1h, btc_change_5m, btc_etat)``.
+    Si la ligne est absente → ``(None, None, UNKNOWN)``.
+    """
+    if not text:
+        return None, None, BTC_ETAT_UNKNOWN
+    match = _BTC_FLASH_LINE_RE.search(text)
+    if not match:
+        return None, None, BTC_ETAT_UNKNOWN
+    try:
+        change_1h = float(match.group(1).replace(",", "."))
+        change_5m = float(match.group(2).replace(",", "."))
+    except ValueError:
+        return None, None, BTC_ETAT_UNKNOWN
+    voyant = match.group(3)
+    etat = _VOYANT_TO_ETAT.get(voyant, BTC_ETAT_UNKNOWN)
+    return change_1h, change_5m, etat
 
 
 def normalize_decision(text: str | None) -> str | None:
@@ -131,6 +165,7 @@ async def process_signal(text: str) -> None:
         return
 
     signal_time = extract_signal_time(text)
+    btc_change_1h, btc_change_5m, btc_etat = parse_btc_flash_metrics(text)
     logger.info("▶ Traitement file : token=%s, heure_signal=%s", token, signal_time)
 
     conn = db_manager.connect()
@@ -160,13 +195,17 @@ async def process_signal(text: str) -> None:
             decision_ia=decision,
             recap_complet=recap,
             chart_paths=charts,
+            btc_change_1h=btc_change_1h,
+            btc_change_5m=btc_change_5m,
+            btc_etat=btc_etat,
         )
         logger.info(
-            "✅ %s analysé (id=%s) → score=%s/10, décision=%s",
+            "✅ %s analysé (id=%s) → score=%s/10, décision=%s, btc_etat=%s",
             token,
             analyse_id,
             score,
             decision,
+            btc_etat,
         )
         try:
             await asyncio.to_thread(btc_context.run_btc_h4_context, analyse_id)
