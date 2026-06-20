@@ -353,6 +353,14 @@ th {
   color: #67e8f9;
 }
 
+.funnel-thumb__tf--btc {
+  color: #fbbf24;
+}
+
+.funnel-thumb--btc .thumb {
+  outline: 1px solid rgba(251, 191, 36, 0.35);
+}
+
 .funnel-thumb__warn {
   display: inline-flex;
   align-items: center;
@@ -452,6 +460,63 @@ th {
 .dash-nav h1 {
   margin: 0 0 0.25rem;
   font-size: 1.5rem;
+}
+
+.dash-nav__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.65rem 1rem;
+}
+
+.market-spot {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.85rem 1.35rem;
+}
+
+.market-spot__pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  padding: 0.28rem 0.9rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.market-spot__sym {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.market-spot__price {
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.market-spot__pair--btc {
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.45);
+  background: rgba(249, 115, 22, 0.12);
+}
+
+.market-spot__pair--btc .market-spot__price {
+  color: #f97316;
+}
+
+.market-spot__pair--eth {
+  color: #818cf8;
+  border: 1px solid rgba(129, 140, 248, 0.45);
+  background: rgba(129, 140, 248, 0.12);
+}
+
+.market-spot__pair--eth .market-spot__price {
+  color: #a5b4fc;
 }
 
 .dash-nav p {
@@ -706,6 +771,19 @@ th {
   font-weight: 700;
 }
 
+.backtest-export-btn {
+  padding: 0.45rem 0.85rem;
+  font-weight: 600;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.backtest-export-btn:hover {
+  border-color: var(--accent);
+  filter: none;
+}
+
 .backtest-spinner {
   align-self: center;
 }
@@ -879,105 +957,6 @@ th {
   height: 100px;
 }
 
-/* ── Backtest latence (optimiste vs réaliste) ─────────────────────── */
-.latency-notice {
-  border-left: 3px solid #d29922;
-  font-size: 0.88rem;
-  color: var(--muted);
-}
-
-.latency-notice code {
-  color: #e2e8f0;
-  font-size: 0.85em;
-}
-
-.latency-meta-note {
-  margin-bottom: 1rem;
-}
-
-.latency-compare-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-}
-
-.latency-stat-card {
-  padding: 1rem;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(15, 23, 42, 0.5);
-}
-
-.latency-stat-card--optimistic {
-  border-left: 3px solid #3fb950;
-}
-
-.latency-stat-card--realistic {
-  border-left: 3px solid #d29922;
-}
-
-.latency-stat-card h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-}
-
-.latency-stat-dl {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.45rem 1rem;
-  margin: 0;
-}
-
-.latency-stat-dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.latency-stat-dl dt {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.latency-stat-dl dd {
-  margin: 0;
-  font-weight: 600;
-  font-size: 0.88rem;
-}
-
-.latency-impact-box {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem 1.5rem;
-  padding: 0.85rem 1rem;
-  margin-bottom: 1.25rem;
-  border-radius: 8px;
-  background: rgba(248, 81, 73, 0.08);
-  border: 1px solid rgba(248, 81, 73, 0.25);
-}
-
-.latency-impact-box__label {
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-.latency-impact-box__value {
-  font-size: 1rem;
-  color: #fca5a5;
-}
-
-.latency-section-title {
-  margin: 1.25rem 0 0.65rem;
-  font-size: 0.95rem;
-}
-
-.backtest-table tr.latency-row-flipped {
-  background: rgba(248, 81, 73, 0.06);
-}
-
 .backtest-table .bt-pnl.pnl-up {
   color: #00ff88;
   font-weight: 700;
@@ -1009,6 +988,109 @@ th {
 .backtest-table .bt-pnl.pnl-neutral.pnl-live {
   font-style: italic;
   animation: backtest-pnl-pulse 2s ease-in-out infinite;
+}
+
+.backtest-table .bt-tp-optimal {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.backtest-table .bt-tp-optimal.tp-opt-better {
+  color: #3fb950;
+  font-weight: 600;
+}
+
+.backtest-table .bt-tp-optimal.tp-opt-ok {
+  color: var(--muted);
+}
+
+/* ── Backtest temporel (filtres date / créneau) ─────────────────── */
+.backtest-tempo-panel {
+  margin-bottom: 1rem;
+  border-left: 3px solid #6366f1;
+}
+
+.backtest-tempo-panel__title {
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+  color: #c7d2fe;
+}
+
+.backtest-tempo-dates,
+.backtest-tempo-hours {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.backtest-tempo-dates label,
+.backtest-tempo-hours label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.backtest-tempo-dates input[type="date"],
+.backtest-tempo-hours input[type="time"] {
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  font-size: 0.88rem;
+}
+
+.backtest-tempo-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.backtest-tempo-preset {
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(99, 102, 241, 0.1);
+  color: #c7d2fe;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.backtest-tempo-preset:hover {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.backtest-tempo-apply {
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.2);
+  color: #e0e7ff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.backtest-tempo-apply:hover {
+  background: rgba(99, 102, 241, 0.32);
+}
+
+.backtest-tempo-interval {
+  margin: 0.75rem 0 0;
+  font-size: 0.88rem;
+  color: #c7d2fe;
+  line-height: 1.45;
+}
+
+.backtest-meta--sub {
+  margin-top: -0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.82rem;
 }
 
 .backtest-filtre--etat {
@@ -1132,4 +1214,88 @@ th {
   color: var(--muted);
   font-style: italic;
   font-weight: 600;
+}
+
+/* ── Date ON/OFF (régimes BTC H4) ── */
+.btc-regime-controls {
+  margin-bottom: 1rem;
+}
+
+.btc-regime-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.btc-regime-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.btc-regime-meta,
+.btc-regime-status {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+
+.btc-regime-status {
+  color: #67e8f9;
+}
+
+.btc-regime-chart__title {
+  font-size: 0.95rem;
+  margin: 0 0 0.75rem;
+}
+
+.btc-regime-chart__img {
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.btc-regime-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.btc-regime-table th,
+.btc-regime-table td {
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  vertical-align: top;
+}
+
+.btc-regime-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.btc-regime-justif {
+  max-width: 28rem;
+  line-height: 1.35;
+}
+
+.btc-regime-row--green {
+  background: rgba(34, 197, 94, 0.04);
+}
+
+.btc-regime-row--yellow {
+  background: rgba(234, 179, 8, 0.05);
+}
+
+.btc-regime-row--red {
+  background: rgba(239, 68, 68, 0.03);
 }

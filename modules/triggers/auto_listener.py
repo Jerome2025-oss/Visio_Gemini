@@ -54,17 +54,16 @@ _TOKEN_RE = re.compile(r"FLASH\s*[—–\-:]\s*([A-Z0-9]{2,20}USDT)", re.IGNOREC
 _SIGNAL_TIME_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*UTC", re.IGNORECASE
 )
-# « 📊 BTC Δ1h +1.2% | Δ5m -0.3% 🟢 »
+# « 📊 BTC Δ1h +1.2% | Δ5m -0.3% 🟢 » (pastille optionnelle depuis juin 2026)
 _BTC_FLASH_LINE_RE = re.compile(
-    r"BTC\s*[ΔD]1h\s*([+-]?\d+(?:[.,]\d+)?)\s*%\s*\|\s*[ΔD]5m\s*([+-]?\d+(?:[.,]\d+)?)\s*%\s*([🟢✅🔴])",
+    r"BTC\s*[ΔD]1h\s*([+-]?\d+(?:[.,]\d+)?)\s*%\s*\|\s*[ΔD]5m\s*([+-]?\d+(?:[.,]\d+)?)\s*%\s*([🟢✅🔴])?",
     re.IGNORECASE,
 )
 _VOYANT_TO_ETAT: dict[str, str] = {
-    "🟢": "OK",
-    "✅": "REPRISE",
-    "🔴": "FAIBLE",
+    "🟢": db_manager.BTC_ETAT_OK,
+    "✅": db_manager.BTC_ETAT_REPRISE,
+    "🔴": db_manager.BTC_ETAT_FAIBLE,
 }
-BTC_ETAT_UNKNOWN = "UNKNOWN"
 # Décision normalisée à partir du texte Gemini.
 _DECISION_RE = re.compile(
     r"D[ÉE]CISION\s*[:：]\s*.*?(TRADE\s+LONG|TRADE\s+SHORT|PAS\s+DE\s+TRADE)",
@@ -109,19 +108,23 @@ def parse_btc_flash_metrics(
 
     Retourne ``(btc_change_1h, btc_change_5m, btc_etat)``.
     Si la ligne est absente → ``(None, None, UNKNOWN)``.
+    Sans pastille emoji, l'état est déduit des deltas (``infer_btc_etat_from_changes``).
     """
     if not text:
-        return None, None, BTC_ETAT_UNKNOWN
+        return None, None, db_manager.BTC_ETAT_UNKNOWN
     match = _BTC_FLASH_LINE_RE.search(text)
     if not match:
-        return None, None, BTC_ETAT_UNKNOWN
+        return None, None, db_manager.BTC_ETAT_UNKNOWN
     try:
         change_1h = float(match.group(1).replace(",", "."))
         change_5m = float(match.group(2).replace(",", "."))
     except ValueError:
-        return None, None, BTC_ETAT_UNKNOWN
+        return None, None, db_manager.BTC_ETAT_UNKNOWN
     voyant = match.group(3)
-    etat = _VOYANT_TO_ETAT.get(voyant, BTC_ETAT_UNKNOWN)
+    if voyant:
+        etat = _VOYANT_TO_ETAT.get(voyant, db_manager.BTC_ETAT_UNKNOWN)
+    else:
+        etat = db_manager.infer_btc_etat_from_changes(change_1h, change_5m)
     return change_1h, change_5m, etat
 
 

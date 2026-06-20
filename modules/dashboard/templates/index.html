@@ -9,18 +9,10 @@
 </head>
 <body>
   <div class="wrap">
-    <header class="dash-nav">
-      <div>
-        <h1>Visio Gemini</h1>
-        <p>Analyses automatiques FLASH · port 8004</p>
-      </div>
-      <nav class="dash-nav__links">
-        <a href="/" class="is-active">Dashboard</a>
-        <a href="/btc-trend">BTC H4</a>
-        <a href="/backtest">Backtest</a>
-        <a href="/manu">MANU</a>
-      </nav>
-    </header>
+    {% set page_title = "Visio Gemini" %}
+    {% set page_subtitle = "Analyses automatiques FLASH · port 8004" %}
+    {% set nav_active = "dashboard" %}
+    {% include "_dash_nav.html" %}
 
     <section class="panel">
       <div class="results-head">

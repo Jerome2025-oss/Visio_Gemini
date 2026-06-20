@@ -70,6 +70,45 @@ CREATE INDEX IF NOT EXISTS idx_btc_scans_snapshot
     ON btc_scans (btc_h4_snapshot);
 """
 
+# Régimes macro BTC H4 par plages de dates (page Date ON/OFF).
+_BTC_REGIME_DATES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS btc_regime_dates (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date_range      TEXT    NOT NULL,
+    avg_price       TEXT,
+    above_tenkan    INTEGER,
+    position_label  TEXT,
+    context_score   INTEGER NOT NULL,
+    verdict         TEXT    NOT NULL,
+    justification   TEXT,
+    run_id          TEXT    NOT NULL,
+    chart_path      TEXT,
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL
+);
+"""
+
+_BTC_REGIME_DATES_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_btc_regime_dates_run
+    ON btc_regime_dates (run_id, sort_order);
+"""
+
+_BTC_REGIME_STATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS btc_regime_state (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    chart_path  TEXT,
+    last_run_at TEXT,
+    last_error  TEXT
+);
+"""
+
+_BTC_REGIME_MIGRATE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("etat", "TEXT"),
+    ("transition", "TEXT"),
+    ("transition_note", "INTEGER"),
+    ("zone", "TEXT"),
+)
+
 
 @dataclass(frozen=True)
 class AnalyseRow:
@@ -159,6 +198,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE analyses_ichimoku ADD COLUMN {name} {col_type}")
             conn.commit()
             logger.info("🧱 Migration : colonne %s ajoutée (données préservées).", name)
+    for name, col_type in _BTC_REGIME_MIGRATE_COLUMNS:
+        if not _column_exists(conn, "btc_regime_dates", name):
+            conn.execute(f"ALTER TABLE btc_regime_dates ADD COLUMN {name} {col_type}")
+            conn.commit()
+            logger.info("🧱 Migration btc_regime_dates : colonne %s ajoutée.", name)
     _migrate_scores_from_recap(conn)
 
 
@@ -190,6 +234,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_INDEX)
     conn.executescript(_BTC_SCANS_SCHEMA)
     conn.executescript(_BTC_SCANS_INDEX)
+    conn.executescript(_BTC_REGIME_DATES_SCHEMA)
+    conn.executescript(_BTC_REGIME_DATES_INDEX)
+    conn.executescript(_BTC_REGIME_STATE_SCHEMA)
     conn.commit()
     _migrate(conn)
 
@@ -260,6 +307,26 @@ def normalize_btc_etat(value: str | None) -> str:
     if value in BTC_ETATS_TRADABLE:
         return value
     return BTC_ETAT_UNKNOWN
+
+
+def infer_btc_etat_from_changes(
+    change_1h: float | None,
+    change_5m: float | None,
+) -> str:
+    """Déduit l'état BTC flash quand le message Telegram n'a pas de pastille.
+
+    Règles alignées sur ``Detecte_Pump`` (``flash_alerts._btc_voyant``) :
+    - Δ1h ≤ -0,5 % → FAIBLE (chute nette)
+    - Δ1h < 0 et Δ5m > 0 → REPRISE (rebond court)
+    - sinon → OK
+    """
+    if change_1h is None:
+        return BTC_ETAT_UNKNOWN
+    if change_1h <= -0.5:
+        return BTC_ETAT_FAIBLE
+    if change_1h < 0 and (change_5m or 0) > 0:
+        return BTC_ETAT_REPRISE
+    return BTC_ETAT_OK
 
 
 def btc_etat_voyant(etat: str | None) -> str:
@@ -482,3 +549,124 @@ def update_trade_result(
             exit_type,
         )
     return updated
+
+
+def fetch_btc_regime_dates(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str | None = None,
+) -> list[sqlite3.Row]:
+    """Lignes du tableau Date ON/OFF (dernier run par défaut)."""
+    if run_id is None:
+        run_id = fetch_latest_btc_regime_run_id(conn)
+    if not run_id:
+        return []
+    return conn.execute(
+        """
+        SELECT id, date_range, etat, zone, transition, transition_note,
+               avg_price, above_tenkan, position_label,
+               context_score, verdict, justification, run_id, chart_path,
+               sort_order, created_at
+        FROM btc_regime_dates
+        WHERE run_id = ?
+        ORDER BY sort_order ASC, id ASC
+        """,
+        (run_id,),
+    ).fetchall()
+
+
+def fetch_latest_btc_regime_run_id(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        """
+        SELECT run_id FROM btc_regime_dates
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    return str(row["run_id"]) if row else None
+
+
+def fetch_btc_regime_meta(conn: sqlite3.Connection) -> dict[str, str | None]:
+    """Métadonnées du dernier run (horodatage, chart)."""
+    state = conn.execute(
+        "SELECT chart_path, last_run_at, last_error FROM btc_regime_state WHERE id = 1"
+    ).fetchone()
+    row = conn.execute(
+        """
+        SELECT run_id, chart_path, created_at,
+               (SELECT COUNT(*) FROM btc_regime_dates r2 WHERE r2.run_id = r1.run_id) AS n_rows
+        FROM btc_regime_dates r1
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    chart_path = (state["chart_path"] if state else None) or (row["chart_path"] if row else None)
+    if not row and not state:
+        return {"run_id": None, "chart_path": None, "created_at": None, "n_rows": "0", "last_error": None}
+    return {
+        "run_id": str(row["run_id"]) if row else None,
+        "chart_path": chart_path,
+        "created_at": (row["created_at"] if row else None) or (state["last_run_at"] if state else None),
+        "n_rows": str(row["n_rows"]) if row else "0",
+        "last_error": state["last_error"] if state else None,
+    }
+
+
+def save_btc_regime_state(
+    conn: sqlite3.Connection,
+    *,
+    chart_path: str | None,
+    last_error: str | None = None,
+) -> None:
+    """Persiste la dernière capture / erreur (même si le parse Gemini échoue)."""
+    now = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        """
+        INSERT INTO btc_regime_state (id, chart_path, last_run_at, last_error)
+        VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            chart_path = excluded.chart_path,
+            last_run_at = excluded.last_run_at,
+            last_error = excluded.last_error
+        """,
+        (chart_path, now, last_error),
+    )
+    conn.commit()
+
+
+def replace_btc_regime_dates(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    chart_path: str | None,
+    rows: list[dict],
+) -> int:
+    """Remplace tout le tableau par un nouveau run (analyse complète)."""
+    now = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM btc_regime_dates")
+    inserted = 0
+    for idx, row in enumerate(rows):
+        conn.execute(
+            """
+            INSERT INTO btc_regime_dates (
+                date_range, etat, zone, transition, transition_note,
+                avg_price, above_tenkan, position_label,
+                context_score, verdict, justification,
+                run_id, chart_path, sort_order, created_at
+            ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, 0, 'OFF', NULL, ?, ?, ?, ?)
+            """,
+            (
+                row["date"],
+                row.get("etat"),
+                row.get("zone"),
+                row.get("transition"),
+                row.get("transition_note"),
+                run_id,
+                chart_path,
+                idx,
+                now,
+            ),
+        )
+        inserted += 1
+    conn.commit()
+    return inserted

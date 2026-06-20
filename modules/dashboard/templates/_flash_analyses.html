@@ -28,7 +28,7 @@
     </span>
   </div>
 
-  {% if a.charts %}
+  {% if a.charts or a.btc_chart %}
   <div class="funnel-thumbs">
     {% for chart in a.charts %}
     {% set url = chart | png_url %}
@@ -43,6 +43,19 @@
       {% endif %}
     </div>
     {% endfor %}
+    {% if a.btc_chart %}
+    {% set btc_url = a.btc_chart | png_url %}
+    <div class="funnel-thumb funnel-thumb--btc">
+      <span class="funnel-thumb__tf funnel-thumb__tf--btc">BTC H4</span>
+      {% if btc_url %}
+      <a href="{{ btc_url }}" target="_blank" rel="noopener" title="Contexte macro BTC H4{% if a.btc_h4_snapshot %} · {{ a.btc_h4_snapshot }}{% endif %}">
+        <img class="thumb thumb--btc" src="{{ btc_url }}" alt="BTC H4 contexte macro">
+      </a>
+      {% else %}
+      <span class="funnel-thumb__warn">⚠️ BTC H4 indisponible</span>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
   {% else %}
   <div class="funnel-thumb__warn">⚠️ Charts non enregistrés pour cette analyse.</div>

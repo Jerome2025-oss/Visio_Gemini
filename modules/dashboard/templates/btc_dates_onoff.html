@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visio Gemini — Date ON/OFF</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    {% set page_title = "Date ON/OFF" %}
+    {% set page_subtitle = "Ligne cyan vs bloc bleu · 1 jour = 1 trait vertical · layout Ten Kan" %}
+    {% set nav_active = "btc-dates-onoff" %}
+    {% include "_dash_nav.html" %}
+
+    <section class="panel btc-regime-controls">
+      <div class="btc-regime-toolbar">
+        <div class="btc-regime-legend funnel-card__meta">
+          <span><i class="dot dot-green"></i> OUI = ligne au-dessus du bloc</span>
+          <span><i class="dot dot-red"></i> NON = ligne dans/sous le bloc</span>
+          <span><i class="dot dot-yellow"></i> LIMITE = ligne au bord</span>
+        </div>
+        <button type="button" id="btn-regime-update" class="backtest-run-btn btc-regime-update">
+          ⚡ Mettre à jour le tableau
+        </button>
+      </div>
+      <p class="btc-regime-meta" id="regime-meta">
+        {% if meta.created_at %}
+        Dernière analyse : <strong>{{ meta.created_at }} UTC</strong>
+        · {{ meta.n_rows }} ligne(s)
+        · OUI : <strong>{{ n_oui }}</strong> · NON : <strong>{{ n_non }}</strong> · LIMITE : <strong>{{ n_limite }}</strong>
+        {% else %}
+        Aucune analyse enregistrée — clique sur « Mettre à jour » pour lancer Gemini sur le chart Ten Kan.
+        {% endif %}
+      </p>
+      <p class="btc-regime-status" id="regime-status" aria-live="polite"></p>
+    </section>
+
+    {% if chart_url %}
+    <section class="panel btc-regime-chart" id="regime-chart-panel">
+      <h2 class="btc-regime-chart__title">Chart source (Ten Kan · ligne cyan + bloc bleu + grille verticale)</h2>
+      <a id="regime-chart-link" href="{{ chart_url }}" target="_blank" rel="noopener">
+        <img class="btc-regime-chart__img" id="regime-chart-img" src="{{ chart_url }}" alt="BTC H4 capture Ten Kan">
+      </a>
+    </section>
+    {% else %}
+    <section class="panel btc-regime-chart" id="regime-chart-panel" hidden></section>
+    {% endif %}
+
+    <section class="panel">
+      <h2>États jour par jour</h2>
+      <div class="table-wrap">
+        <table class="btc-regime-table" id="regime-table">
+            <thead>
+            <tr>
+              <th>Date</th>
+              <th>Zone</th>
+              <th>État</th>
+              <th>Transition</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody id="regime-tbody">
+            {% if rows %}
+            {% for r in rows %}
+            <tr class="btc-regime-row btc-regime-row--{{ r.etat_color }}">
+              <td>{{ r.date }}</td>
+              <td>{{ r.zone }}</td>
+              <td><span class="badge badge-{{ r.etat_color }}">{{ r.etat }}</span></td>
+              <td>{{ r.transition }}</td>
+              <td>{{ r.note_display }}</td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr id="regime-empty">
+              <td colspan="5" class="empty">Tableau vide — lance une mise à jour.</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const btn = document.getElementById("btn-regime-update");
+    const statusEl = document.getElementById("regime-status");
+    const metaEl = document.getElementById("regime-meta");
+    const tbody = document.getElementById("regime-tbody");
+
+    function rowDate(r, sortOrder, fixedDays, totalRows) {
+      if (r.date && r.date !== "—") return r.date;
+      const order = sortOrder ?? 0;
+      if (fixedDays?.length && totalRows === fixedDays.length * 2) {
+        const dayIdx = Math.floor(order / 2);
+        if (dayIdx >= 0 && dayIdx < fixedDays.length) return fixedDays[dayIdx];
+      }
+      if (fixedDays?.length && totalRows === fixedDays.length && order < fixedDays.length) {
+        return fixedDays[order];
+      }
+      return "—";
+    }
+
+    function logGeminiDiagnostic(data) {
+      const raw = data.gemini_raw;
+      console.log("[Date ON/OFF] Gemini brut (réponse COMPLÈTE):", raw ?? "(absent)");
+      if (data.parse_diag) {
+        console.log("[Date ON/OFF] Diagnostic parsing:", data.parse_diag);
+        const d = data.parse_diag;
+        if (d.prompt_issue || d.format_legacy_jours || (d.n_dot5 === 0 && d.n_points_json > 0)) {
+          console.warn(
+            "[Date ON/OFF] ⚠️ PROMPT — JSON sans points .5 (format legacy ou 1 entrée/jour).",
+            "Attendu:", d.n_points_expected, "points · Reçu:", d.n_points_json,
+            "· .5:", d.n_dot5, "· ~", d.entries_per_day, "entrée(s)/jour"
+          );
+        } else {
+          console.log(
+            "[Date ON/OFF] ✓ Format OK —", d.n_points_json, "points,",
+            d.n_dot5, "× .5, ~", d.entries_per_day, "entrée(s)/jour"
+          );
+        }
+      }
+      if (raw) {
+        try {
+          const cleaned = String(raw).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+          const payload = JSON.parse(cleaned);
+          const points = Array.isArray(payload)
+            ? payload
+            : (payload.jours || payload.points || []);
+          if (Array.isArray(points)) {
+            const byDay = {};
+            for (const p of points) {
+              const day = p.date || (p.index != null ? String(Math.trunc(Number(p.index))) : "?");
+              byDay[day] = (byDay[day] || 0) + 1;
+            }
+            console.log("[Date ON/OFF] Entrées par jour (JSON brut):", byDay);
+            const sample = points.find((p) => String(p.date || "").includes("12 juin") || Number(p.index) === 12);
+            if (sample) console.log("[Date ON/OFF] Exemple 12 juin dans le JSON:", sample);
+          }
+        } catch (_) {
+          console.log("[Date ON/OFF] JSON brut non parseable côté client (voir texte ci-dessus).");
+        }
+      }
+    }
+
+    function renderRows(rows, fixedDays) {
+      if (!rows || !rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">Aucun jour retourné.</td></tr>';
+        return;
+      }
+      const totalRows = rows.length;
+      const sorted = [...rows].sort(
+        (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      );
+      tbody.innerHTML = sorted.map((r) => {
+        const order = r.sort_order ?? 0;
+        return `
+        <tr class="btc-regime-row btc-regime-row--${r.etat_color}">
+          <td>${rowDate(r, order, fixedDays, totalRows)}</td>
+          <td>${r.zone ?? "—"}</td>
+          <td><span class="badge badge-${r.etat_color}">${r.etat}</span></td>
+          <td>${r.transition}</td>
+          <td>${r.note_display}</td>
+        </tr>
+      `;
+      }).join("");
+    }
+
+    function updateChart(url) {
+      if (!url) return;
+      const panel = document.getElementById("regime-chart-panel");
+      let link = document.getElementById("regime-chart-link");
+      let img = document.getElementById("regime-chart-img");
+      if (!panel) return;
+      panel.hidden = false;
+      if (!link) {
+        panel.innerHTML = '<h2 class="btc-regime-chart__title">Chart source (Ten Kan · ligne cyan + bloc bleu + grille verticale)</h2>';
+        link = document.createElement("a");
+        link.id = "regime-chart-link";
+        link.target = "_blank";
+        link.rel = "noopener";
+        img = document.createElement("img");
+        img.id = "regime-chart-img";
+        img.className = "btc-regime-chart__img";
+        img.alt = "BTC H4 capture Ten Kan";
+        link.appendChild(img);
+        panel.appendChild(link);
+      }
+      link.href = url;
+      img.src = url + "?t=" + Date.now();
+    }
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      statusEl.textContent = "Capture Ten Kan + analyse Gemini en cours… (30–60 s)";
+      try {
+        const res = await fetch("/btc-dates-onoff/run", { method: "POST" });
+        const data = await res.json();
+        logGeminiDiagnostic(data);
+        if (data.rows && data.rows.length) {
+          console.log("[Date ON/OFF] Lignes API rendues:", data.rows.length);
+          const j12 = data.rows.filter((r) => r.date === "12 juin");
+          if (j12.length) console.log("[Date ON/OFF] Lignes 12 juin (tableau):", j12);
+        }
+        if (data.chart_url) {
+          updateChart(data.chart_url);
+        }
+        if (!res.ok || !data.ok) {
+          statusEl.textContent = "Erreur : " + (data.error || res.statusText);
+          return;
+        }
+        renderRows(data.rows, data.fixed_days);
+        const m = data.meta || {};
+        metaEl.innerHTML = `Dernière analyse : <strong>${m.created_at || "—"} UTC</strong> · ${m.n_rows || data.n_rows} ligne(s) · OUI : <strong>${data.n_oui ?? 0}</strong> · NON : <strong>${data.n_non ?? 0}</strong> · LIMITE : <strong>${data.n_limite ?? 0}</strong>`;
+        statusEl.textContent = "Tableau mis à jour (" + data.n_rows + " ligne(s)).";
+      } catch (err) {
+        statusEl.textContent = "Erreur réseau : " + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

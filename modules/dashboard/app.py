@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from modules.config import load_app_config
+from modules.dashboard.btc_price import get_market_spot
 from modules.dashboard.routes import register_png_url_filter, router
 
 DASHBOARD_DIR = Path(__file__).resolve().parent
@@ -19,6 +20,7 @@ def create_app() -> FastAPI:
     app_config = load_app_config()
     templates = Jinja2Templates(directory=str(DASHBOARD_DIR / "templates"))
     register_png_url_filter(templates, app_config.paths.captures)
+    templates.env.globals["market_spot"] = get_market_spot
 
     app = FastAPI(title="Visio Gemini Dashboard")
     app.state.templates = templates

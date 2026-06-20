@@ -7,11 +7,16 @@ Rapatrié depuis src/capture.py — comportement identique.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from playwright.sync_api import TimeoutError as PWTimeout
 from playwright.sync_api import sync_playwright
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Page
 
 from modules.config.jobs import CaptureJob
 from modules.config.playwright import ensure_playwright_browsers_path
@@ -66,6 +71,7 @@ def capture_chart(
     *,
     viewport: dict[str, int] | None = None,
     zoom_out_steps: int = 0,
+    page_setup: Callable[["Page"], None] | None = None,
 ) -> Path:
     """
     Capture le graphique configuré et retourne le chemin du PNG généré.
@@ -112,6 +118,9 @@ def capture_chart(
                     page.keyboard.press("-")
                     page.wait_for_timeout(120)
                 page.wait_for_timeout(800)
+
+            if page_setup is not None:
+                page_setup(page)
 
             final_url = page.url
             print(f"📍 URL finale       : {final_url}")

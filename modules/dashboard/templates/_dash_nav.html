@@ -1,0 +1,30 @@
+{% set spot = market_spot() %}
+<header class="dash-nav">
+  <div>
+    <h1 class="dash-nav__title">
+      {{ page_title }}
+      <span class="market-spot" id="market-spot" title="Bitunix Perp · actualisation 30 s">
+        <span class="market-spot__pair market-spot__pair--btc" data-symbol="btc">
+          <span class="market-spot__sym" aria-hidden="true">₿</span>
+          <span class="market-spot__price">{{ spot.btc.price_display }}</span>
+        </span>
+        <span class="market-spot__pair market-spot__pair--eth" data-symbol="eth">
+          <span class="market-spot__sym" aria-hidden="true">Ξ</span>
+          <span class="market-spot__price">{{ spot.eth.price_display }}</span>
+        </span>
+      </span>
+    </h1>
+    {% if page_subtitle %}
+    <p>{{ page_subtitle }}</p>
+    {% endif %}
+  </div>
+  <nav class="dash-nav__links" aria-label="Navigation principale">
+    <a href="/"{% if nav_active == "dashboard" %} class="is-active"{% endif %}>Dashboard</a>
+    <a href="/btc-trend"{% if nav_active == "btc-trend" %} class="is-active"{% endif %}>BTC H4</a>
+    <a href="/btc-dates-onoff"{% if nav_active == "btc-dates-onoff" %} class="is-active"{% endif %}>Date ON/OFF</a>
+    <a href="/backtest"{% if nav_active == "backtest" %} class="is-active"{% endif %}>Backtest</a>
+    <a href="/backtest/tempo"{% if nav_active == "backtest-tempo" %} class="is-active"{% endif %}>Backtest TEMPO</a>
+    <a href="/manu"{% if nav_active == "manu" %} class="is-active"{% endif %}>MANU</a>
+  </nav>
+</header>
+<script src="/static/btc_spot.js" defer></script>

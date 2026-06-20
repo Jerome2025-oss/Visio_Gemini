@@ -9,18 +9,10 @@
 </head>
 <body>
   <div class="wrap">
-    <header class="dash-nav">
-      <div>
-        <h1>Analyse manuelle</h1>
-        <p>Lancement manuel · agents multi-TF · entonnoir Ichimoku 3TF</p>
-      </div>
-      <nav class="dash-nav__links">
-        <a href="/">Dashboard</a>
-        <a href="/btc-trend">BTC H4</a>
-        <a href="/backtest">Backtest</a>
-        <a href="/manu" class="is-active">MANU</a>
-      </nav>
-    </header>
+    {% set page_title = "Analyse manuelle" %}
+    {% set page_subtitle = "Lancement manuel · agents multi-TF · entonnoir Ichimoku 3TF" %}
+    {% set nav_active = "manu" %}
+    {% include "_dash_nav.html" %}
 
     <section class="panel">
       <form

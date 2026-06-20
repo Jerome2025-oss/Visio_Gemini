@@ -1,0 +1,31 @@
+# === Environnements Python ===
+**/venv/
+**/.venv/
+**/env/
+
+# === Caches & dépendances ===
+**/__pycache__/
+**/*.pyc
+**/node_modules/
+**/.pytest_cache/
+
+# === Gros fichiers (DB, backups) ===
+**/*.db
+**/*.db-*
+**/backups/
+**/logs/
+
+# === Contrôle de version ===
+**/.git/
+**/.github/
+
+# === IDE & OS ===
+**/.vscode/
+**/.idea/
+**/__MACOSX/
+**/.DS_Store
+
+# === Fichiers sensibles (double protection) ===
+**/.env
+**/*.pem
+**/*.key

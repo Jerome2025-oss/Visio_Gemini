@@ -60,6 +60,7 @@ class MammouthProvider(VisionProvider):
         prompt: str,
         *,
         context: AnalyzeContext | None = None,
+        temperature: float | None = None,
     ) -> VisionResult:
         if not prompt.strip():
             raise ProviderError("Prompt vide", reason="invalid_input")
@@ -88,9 +89,9 @@ class MammouthProvider(VisionProvider):
 
         try:
             print("📡 Appel API en cours...")
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
+            create_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": [
                     {
                         "role": "user",
                         "content": [
@@ -99,7 +100,10 @@ class MammouthProvider(VisionProvider):
                         ],
                     }
                 ],
-            )
+            }
+            if temperature is not None:
+                create_kwargs["temperature"] = temperature
+            response = client.chat.completions.create(**create_kwargs)
         except Exception as exc:
             raise ProviderError(str(exc), reason="api_error") from exc
 

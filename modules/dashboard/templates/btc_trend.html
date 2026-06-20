@@ -9,18 +9,10 @@
 </head>
 <body>
   <div class="wrap">
-    <header class="dash-nav">
-      <div>
-        <h1>Tendance BTC H4</h1>
-        <p>Contexte macro Ichimoku · scans planifiés (5×/jour) + contexte flash</p>
-      </div>
-      <nav class="dash-nav__links">
-        <a href="/">Dashboard</a>
-        <a href="/btc-trend" class="is-active">BTC H4</a>
-        <a href="/backtest">Backtest</a>
-        <a href="/manu">MANU</a>
-      </nav>
-    </header>
+    {% set page_title = "Tendance BTC H4" %}
+    {% set page_subtitle = "Contexte macro Ichimoku · scans planifiés (5×/jour) + contexte flash" %}
+    {% set nav_active = "btc-trend" %}
+    {% include "_dash_nav.html" %}
 
     <section class="panel btc-trend-controls">
       <div class="btc-trend-toolbar">
@@ -90,6 +82,24 @@
       return `${day} ${month}`;
     }
 
+    function registerBtcTooltipPositioner() {
+      if (Chart.Tooltip.positioners.offsetAbove) return;
+      Chart.Tooltip.positioners.offsetAbove = function (items, eventPosition) {
+        const pos = Chart.Tooltip.positioners.nearest(items, eventPosition);
+        if (pos === false) return false;
+        const chart = this.chart;
+        const area = chart.chartArea;
+        const offset = 44;
+        const flipBelow = area && pos.y - offset < area.top + 40;
+        return {
+          x: pos.x,
+          y: flipBelow ? pos.y + offset : pos.y - offset,
+          xAlign: "center",
+          yAlign: flipBelow ? "top" : "bottom",
+        };
+      };
+    }
+
     function renderTrend(labels, scores, pointColors, pointBackfill, pointMeta) {
       const ctx = document.getElementById("btc-trend-chart");
       if (trendChart) trendChart.destroy();
@@ -152,6 +162,9 @@
             legend: { display: false },
             tooltip: {
               displayColors: false,
+              position: "offsetAbove",
+              caretPadding: 12,
+              padding: 10,
               callbacks: {
                 title: () => "",
                 label: (item) => {
@@ -198,6 +211,7 @@
       });
     });
 
+    registerBtcTooltipPositioner();
     renderTrend(
       initialData.labels,
       initialData.scores,

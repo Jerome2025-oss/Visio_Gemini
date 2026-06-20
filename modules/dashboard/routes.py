@@ -2,31 +2,37 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from modules.analyse.funnel import _decision_color, format_score_fr, run_funnel
 from modules.analyse.orchestrator import run_batch
 from modules.analyse.results import AnalysisResult
-from modules.backtest.latency_sim import (
-    DEFAULT_LATENCY_SECONDS,
-    PRICE_GRANULARITY,
-    compare_latency_modes,
-    klines_from_api,
-)
 from modules.config import load_app_config
+from modules.dashboard.backtest_optimal_tp import build_optimal_tp_fields
+from modules.dashboard.backtest_temporal import (
+    TemporalFilter,
+    filter_flashes_temporal,
+    resolve_temporal_filter,
+    temporal_interval_label,
+    temporal_period_summary,
+)
+from modules.dashboard.btc_price import get_market_spot
 from modules.dashboard.store import add_run, latest
 from modules.selection.bitunix_symbols import normalize_token_key
 from modules.selection.builders import build_manual_requests
 from modules.triggers import btc_context, db_manager
+from modules.triggers import btc_regime_dates
 
 router = APIRouter()
 
@@ -111,6 +117,12 @@ def _render_results(
         "_results.html",
         _results_context(request, results=results, run_error=run_error),
     )
+
+
+@router.get("/api/market-spot")
+def api_market_spot() -> JSONResponse:
+    """Prix BTCUSDT et ETHUSDT Bitunix Perp (cache 30 s) — en-tête dashboard."""
+    return JSONResponse(get_market_spot())
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -254,12 +266,14 @@ def _flash_view_with_btc(row: db_manager.AnalyseRow, raw: sqlite3.Row) -> dict:
     btc = btc_context.read_btc_fields_from_row(raw)
     flash_btc = _read_btc_flash_fields(raw)
     score = btc.get("btc_context_score")
+    captures_dir = load_app_config().paths.captures
     view.update(
         {
             "btc_above_tenkan": btc.get("btc_above_tenkan"),
             "btc_tenkan_slope": btc.get("btc_tenkan_slope"),
             "btc_context_score": score,
             "btc_h4_snapshot": btc.get("btc_h4_snapshot"),
+            "btc_chart": btc_context.resolve_btc_chart_path(raw, captures_dir=captures_dir),
             "btc_badge_color": btc_context.btc_badge_color(score),
             "btc_badge_label": btc_context.btc_badge_label(score),
             "btc_etat": flash_btc["btc_etat"],
@@ -575,6 +589,72 @@ def btc_trend_data(period: str = "30d") -> JSONResponse:
     return JSONResponse(_btc_trend_payload(period_norm))
 
 
+def _btc_regime_chart_url(chart_path: str | None) -> str:
+    if not chart_path:
+        return ""
+    try:
+        captures = load_app_config().paths.captures
+        rel = Path(chart_path).resolve().relative_to(captures.resolve())
+        return f"/captures/{rel.as_posix()}"
+    except ValueError:
+        return ""
+
+
+def _btc_regime_page_context() -> dict[str, Any]:
+    conn = db_manager.connect()
+    try:
+        rows, meta, fixed_days = btc_regime_dates.fetch_regime_table(conn)
+    finally:
+        conn.close()
+    chart_url = _btc_regime_chart_url(meta.get("chart_path"))
+    return {
+        "rows": rows,
+        "meta": meta,
+        "chart_url": chart_url,
+        "fixed_days": list(fixed_days),
+        "n_oui": sum(1 for r in rows if r.get("etat") == "OUI"),
+        "n_non": sum(1 for r in rows if r.get("etat") == "NON"),
+        "n_limite": sum(1 for r in rows if r.get("etat") == "LIMITE"),
+    }
+
+
+def _btc_regime_run_response(result: dict[str, Any]) -> dict[str, Any]:
+    ctx = _btc_regime_page_context()
+    chart_url = _btc_regime_chart_url(result.get("chart_path")) or ctx.get("chart_url", "")
+    return {**result, **ctx, "chart_url": chart_url}
+
+
+@router.get("/btc-dates-onoff", response_class=HTMLResponse)
+def btc_dates_onoff_page(request: Request) -> HTMLResponse:
+    """Page Date ON/OFF — régimes macro BTC H4 par plages."""
+    templates = request.app.state.templates
+    ctx = _btc_regime_page_context()
+    return templates.TemplateResponse(
+        request,
+        "btc_dates_onoff.html",
+        {
+            "request": request,
+            **ctx,
+        },
+    )
+
+
+@router.post("/btc-dates-onoff/run")
+def btc_dates_onoff_run() -> JSONResponse:
+    """Relance capture + analyse Gemini et remplace le tableau."""
+    result = btc_regime_dates.run_regime_dates_update()
+    payload = _btc_regime_run_response(result)
+    if not result.get("ok"):
+        return JSONResponse(payload, status_code=502)
+    return JSONResponse(payload)
+
+
+@router.get("/btc-dates-onoff/data")
+def btc_dates_onoff_data() -> JSONResponse:
+    """Données JSON du tableau (dernier run)."""
+    return JSONResponse(_btc_regime_page_context())
+
+
 def _normalize_backtest_etats(
     *,
     btc_ok: bool = True,
@@ -605,51 +685,49 @@ def _read_btc_flash_fields(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _passes_btc_etat_backtest(row: sqlite3.Row, etats: set[str]) -> bool:
-    """Filtre voyant BTC flash — ``UNKNOWN`` exclus de la simulation."""
+    """Filtre voyant BTC flash pour les états connus (OK/REPRISE/FAIBLE)."""
     if not etats:
         return False
     fields = _read_btc_flash_fields(row)
-    if fields["btc_etat"] == db_manager.BTC_ETAT_UNKNOWN:
-        return False
     return fields["btc_etat"] in etats
 
 
 def _include_flash_in_backtest_list(row: sqlite3.Row, etats: set[str]) -> bool:
-    """Liste historique : ``UNKNOWN`` toujours visible ; états connus selon cases."""
+    """Liste historique : filtre strict sur les états cochés.
+
+    Depuis le nettoyage DB, les flashs sans pastille (ancien format) sont supprimés.
+    """
     fields = _read_btc_flash_fields(row)
-    if fields["btc_etat"] == db_manager.BTC_ETAT_UNKNOWN:
-        return True
     return _passes_btc_etat_backtest(row, etats)
 
 
 def _include_flash_in_backtest_sim(flash: dict[str, Any], etats: set[str]) -> bool:
     """Simulation batch : filtre voyant optionnel.
 
-    - etats vide (aucune case cochée) → tous les flashs visibles sont simulés,
-      y compris btc_etat = UNKNOWN.
-    - etats non vide → filtre strict : seuls les flashs dont btc_etat est dans
-      la sélection. UNKNOWN n'étant ni OK/REPRISE/FAIBLE, il est exclu.
+    - ``etats`` vide (aucune case cochée) → tous les flashs visibles simulés.
+    - ``etats`` non vide → filtre strict : uniquement les états cochés.
     """
     if not etats:
         return True
-    return flash.get("btc_etat") in etats
+    btc_etat = flash.get("btc_etat")
+    return btc_etat in etats
 
 
 def _normalize_backtest_filtres(filtres: list[str] | str | None) -> list[str]:
-    """Normalise les filtres backtest : [] = tous, sinon sous-ensemble de ichimoku/btc."""
+    """Normalise les filtres backtest : [] = tous, sinon sous-ensemble ichimoku/btc/btc10."""
     if filtres is None:
         return []
     if isinstance(filtres, str):
         key = filtres.strip().lower()
         if key in ("", "tous", "all"):
             return []
-        if key in ("ichimoku", "btc"):
+        if key in ("ichimoku", "btc", "btc10"):
             return [key]
         return []
     out: list[str] = []
     for raw in filtres:
         key = str(raw).strip().lower()
-        if key in ("ichimoku", "btc") and key not in out:
+        if key in ("ichimoku", "btc", "btc10") and key not in out:
             out.append(key)
     return out
 
@@ -664,6 +742,13 @@ def _passes_btc_backtest(row: sqlite3.Row) -> bool:
     btc = btc_context.read_btc_fields_from_row(row)
     score = btc.get("btc_context_score")
     return score is not None and int(score) >= 5
+
+
+def _passes_btc10_backtest(row: sqlite3.Row) -> bool:
+    """Filtre BTC H4 strict : btc_context_score = 10."""
+    btc = btc_context.read_btc_fields_from_row(row)
+    score = btc.get("btc_context_score")
+    return score is not None and int(score) == 10
 
 
 def _fetch_backtest_flashes(
@@ -688,6 +773,8 @@ def _fetch_backtest_flashes(
         rows = [r for r in rows if _passes_ichimoku_backtest(r)]
     if "btc" in active:
         rows = [r for r in rows if _passes_btc_backtest(r)]
+    if "btc10" in active:
+        rows = [r for r in rows if _passes_btc10_backtest(r)]
     rows = [r for r in rows if _include_flash_in_backtest_list(r, active_etats)]
     flashes: list[dict[str, Any]] = []
     for row in rows:
@@ -709,6 +796,142 @@ def _fetch_backtest_flashes(
             }
         )
     return flashes
+
+
+def _enrich_row_optimal_tp(
+    row: dict[str, Any],
+    *,
+    leverage: float,
+    tp: float,
+) -> None:
+    """Ajoute tp_optimal_* via klines API (même source que le graphique)."""
+    resultat = str(row.get("resultat") or "")
+    flash_id = row.get("flash_id")
+    klines_payload: dict[str, Any] | None = None
+    if flash_id is not None:
+        klines_payload = _call_backtest_klines(int(flash_id), hours_after=24)
+
+    fields = build_optimal_tp_fields(
+        resultat=resultat,
+        entry_price=row.get("entry_price"),
+        sl_price=row.get("sl_price"),
+        flash_at_ms=klines_payload.get("flash_at_ms") if klines_payload else None,
+        candles=(klines_payload or {}).get("candles") or [],
+        leverage=leverage,
+        tp_pct=tp,
+    )
+    row.update(fields)
+
+
+def _run_backtest_simulation(
+    *,
+    filtres: list[str],
+    etats: set[str],
+    leverage: float,
+    tp: float,
+    sl: float,
+) -> list[dict[str, Any]]:
+    """Exécute la simulation batch (même logique que ``POST /backtest/run``)."""
+    conn = db_manager.connect()
+    try:
+        flashes = _fetch_backtest_flashes(conn, filtres=filtres, etats=etats)
+    finally:
+        conn.close()
+
+    raw_rows: list[dict[str, Any]] = []
+    for flash in flashes:
+        if not _include_flash_in_backtest_sim(flash, etats):
+            continue
+        ts = flash.get("flash_ts")
+        if not ts:
+            row = _backtest_row_from_sim(flash, None)
+        else:
+            payload = _call_simulate_one(
+                symbol=str(flash["token"]),
+                flash_ts=str(ts),
+                leverage=leverage,
+                tp=tp,
+                sl=sl,
+            )
+            row = _backtest_row_from_sim(flash, payload)
+        row.update(
+            {
+                "analysis_time_utc": flash.get("analysis_time_utc"),
+                "score_display": flash.get("score_display"),
+                "decision": flash.get("decision"),
+                "btc_score": flash.get("btc_score"),
+                "btc_change_1h": flash.get("btc_change_1h"),
+                "btc_change_5m": flash.get("btc_change_5m"),
+            }
+        )
+        _enrich_row_optimal_tp(row, leverage=leverage, tp=tp)
+        raw_rows.append(row)
+    return raw_rows
+
+
+# Colonnes alignées sur le tableau backtest (aucune métadonnée IA / delta BTC / prix).
+_BACKTEST_TABLE_CSV_FIELDS: tuple[str, ...] = (
+    "token",
+    "date_flash",
+    "score_ia",
+    "voyant_btc",
+    "btc_score",
+    "resultat",
+    "duree",
+    "pnl_pct",
+    "tp_optimal",
+)
+
+
+def _csv_score_ia(sim_row: dict[str, Any]) -> str:
+    display = sim_row.get("score_display")
+    if display is not None and str(display).strip():
+        return f"{display}/10"
+    score = sim_row.get("score")
+    if score is None:
+        return ""
+    return f"{format_score_fr(score)}/10"
+
+
+def _csv_btc_score(sim_row: dict[str, Any]) -> str:
+    score = sim_row.get("btc_score")
+    if score is None:
+        return ""
+    return f"{score}/10"
+
+
+def _backtest_table_csv_row(sim_row: dict[str, Any]) -> dict[str, Any]:
+    """Une ligne CSV = colonnes visibles du tableau après simulation."""
+    return {
+        "token": sim_row.get("token") or "",
+        "date_flash": sim_row.get("flash_ts") or "",
+        "score_ia": _csv_score_ia(sim_row),
+        "voyant_btc": sim_row.get("btc_etat_voyant") or "",
+        "btc_score": _csv_btc_score(sim_row),
+        "resultat": sim_row.get("resultat") or "",
+        "duree": sim_row.get("duree") or "",
+        "pnl_pct": sim_row.get("pnl_pct") or "",
+        "tp_optimal": sim_row.get("tp_optimal_display") or "",
+    }
+
+
+def _build_backtest_csv(
+    rows: list[dict[str, Any]],
+    *,
+    fieldnames: tuple[str, ...],
+) -> str:
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return buf.getvalue()
+
+
+def _backtest_csv_filename() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"backtest_simulation_{stamp}.csv"
 
 
 def _call_simulate_one(
@@ -765,33 +988,6 @@ def _call_backtest_klines(
     if not payload.get("ok"):
         return None
     return payload
-
-
-def _fetch_klines_for_flash(
-    *,
-    symbol: str,
-    flash_ts: str,
-    leverage: float,
-    tp: float,
-    sl: float,
-) -> list | None:
-    """Récupère les bougies 1m via API bitunix (résolution symbol + flash_ts)."""
-    sim = _call_simulate_one(
-        symbol=symbol,
-        flash_ts=flash_ts,
-        leverage=leverage,
-        tp=tp,
-        sl=sl,
-    )
-    if sim is None:
-        return None
-    flash_id = sim.get("flash_id")
-    if flash_id is None:
-        return None
-    payload = _call_backtest_klines(int(flash_id), hours_after=24)
-    if payload is None:
-        return None
-    return klines_from_api(payload.get("candles") or [])
 
 
 def _format_duration_minutes(minutes: int | None) -> str:
@@ -860,9 +1056,11 @@ def _backtest_row_from_sim(
         ),
         "duree": _format_duration_minutes(payload.get("exit_minutes")),
         "provisional": provisional,
-        "_pnl_raw": pnl_float if pnl_float is not None and code in ("TP", "SL") else None,
+        "_pnl_raw": pnl_float
+        if pnl_float is not None and code in ("TP", "SL", "CLO_24H")
+        else None,
         "_pnl_all": pnl_float
-        if pnl_float is not None and code in ("TP", "SL", "EN_COURS")
+        if pnl_float is not None and code in ("TP", "SL", "CLO_24H", "EN_COURS")
         else None,
     }
     for key in (
@@ -968,17 +1166,6 @@ class BacktestRunRequest(BaseModel):
     btc_faible: bool = True
 
 
-class BacktestLatencyRunRequest(BaseModel):
-    leverage: float = Field(default=30.0, ge=1.0, le=50.0)
-    tp: float = Field(default=1.4, ge=0.1, le=50.0)
-    sl: float = Field(default=2.0, ge=0.1, le=20.0)
-    latency_seconds: int = Field(default=DEFAULT_LATENCY_SECONDS, ge=0, le=300)
-    filtres: list[str] = Field(default_factory=list)
-    btc_ok: bool = True
-    btc_reprise: bool = True
-    btc_faible: bool = True
-
-
 @router.get("/backtest", response_class=HTMLResponse)
 def backtest_page(
     request: Request,
@@ -1029,28 +1216,13 @@ def backtest_run(body: BacktestRunRequest) -> JSONResponse:
         btc_reprise=body.btc_reprise,
         btc_faible=body.btc_faible,
     )
-    conn = db_manager.connect()
-    try:
-        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm, etats=etats)
-    finally:
-        conn.close()
-
-    raw_rows: list[dict[str, Any]] = []
-    for flash in flashes:
-        if not _include_flash_in_backtest_sim(flash, etats):
-            continue
-        ts = flash.get("flash_ts")
-        if not ts:
-            raw_rows.append(_backtest_row_from_sim(flash, None))
-            continue
-        payload = _call_simulate_one(
-            symbol=str(flash["token"]),
-            flash_ts=str(ts),
-            leverage=body.leverage,
-            tp=body.tp,
-            sl=body.sl,
-        )
-        raw_rows.append(_backtest_row_from_sim(flash, payload))
+    raw_rows = _run_backtest_simulation(
+        filtres=filtres_norm,
+        etats=etats,
+        leverage=body.leverage,
+        tp=body.tp,
+        sl=body.sl,
+    )
 
     stats = _compute_backtest_stats(raw_rows)
     resultats = []
@@ -1061,6 +1233,40 @@ def backtest_run(body: BacktestRunRequest) -> JSONResponse:
         resultats.append(c)
 
     return JSONResponse({"resultats": resultats, "stats": stats})
+
+
+@router.get("/backtest/export.csv")
+def backtest_export_csv(
+    filtres: list[str] = Query(default=[]),
+    leverage: float = Query(30.0, ge=1, le=50),
+    tp: float = Query(1.4, ge=0.1, le=50),
+    sl: float = Query(2.0, ge=0.1, le=20),
+    btc_ok: bool = Query(default=True),
+    btc_reprise: bool = Query(default=True),
+    btc_faible: bool = Query(default=True),
+) -> Response:
+    """Export CSV backtest : simulation batch, colonnes du tableau uniquement."""
+    filtres_norm = _normalize_backtest_filtres(filtres)
+    etats = _normalize_backtest_etats(
+        btc_ok=btc_ok,
+        btc_reprise=btc_reprise,
+        btc_faible=btc_faible,
+    )
+    sim_rows = _run_backtest_simulation(
+        filtres=filtres_norm,
+        etats=etats,
+        leverage=leverage,
+        tp=tp,
+        sl=sl,
+    )
+    csv_rows = [_backtest_table_csv_row(r) for r in sim_rows]
+    content = _build_backtest_csv(csv_rows, fieldnames=_BACKTEST_TABLE_CSV_FIELDS)
+    filename = _backtest_csv_filename()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/backtest/chart")
@@ -1100,34 +1306,116 @@ def backtest_chart_data(
     return JSONResponse({"ok": True, "sim": sim, "klines": klines})
 
 
-@router.get("/backtest/latency", response_class=HTMLResponse)
-def backtest_latency_page(
+def _fetch_backtest_flashes_temporal(
+    conn: sqlite3.Connection,
+    *,
+    filtres: list[str] | None,
+    etats: set[str],
+    temporal: TemporalFilter,
+) -> list[dict[str, Any]]:
+    flashes = _fetch_backtest_flashes(conn, filtres=filtres, etats=etats)
+    return filter_flashes_temporal(flashes, temporal)
+
+
+def _run_backtest_temporal_simulation(
+    *,
+    filtres: list[str],
+    etats: set[str],
+    leverage: float,
+    tp: float,
+    sl: float,
+    temporal: TemporalFilter,
+) -> list[dict[str, Any]]:
+    conn = db_manager.connect()
+    try:
+        flashes = _fetch_backtest_flashes_temporal(
+            conn, filtres=filtres, etats=etats, temporal=temporal
+        )
+    finally:
+        conn.close()
+
+    raw_rows: list[dict[str, Any]] = []
+    for flash in flashes:
+        if not _include_flash_in_backtest_sim(flash, etats):
+            continue
+        ts = flash.get("flash_ts")
+        if not ts:
+            row = _backtest_row_from_sim(flash, None)
+        else:
+            payload = _call_simulate_one(
+                symbol=str(flash["token"]),
+                flash_ts=str(ts),
+                leverage=leverage,
+                tp=tp,
+                sl=sl,
+            )
+            row = _backtest_row_from_sim(flash, payload)
+        row.update(
+            {
+                "analysis_time_utc": flash.get("analysis_time_utc"),
+                "score_display": flash.get("score_display"),
+                "decision": flash.get("decision"),
+                "btc_score": flash.get("btc_score"),
+                "btc_change_1h": flash.get("btc_change_1h"),
+                "btc_change_5m": flash.get("btc_change_5m"),
+            }
+        )
+        _enrich_row_optimal_tp(row, leverage=leverage, tp=tp)
+        raw_rows.append(row)
+    return raw_rows
+
+
+def _backtest_tempo_csv_filename() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"backtest_tempo_simulation_{stamp}.csv"
+
+
+class BacktestTemporalRunRequest(BacktestRunRequest):
+    date_debut: str | None = None
+    date_fin: str | None = None
+    heure_debut: str = "00:00"
+    heure_fin: str = "23:59"
+
+
+@router.get("/backtest/tempo", response_class=HTMLResponse)
+def backtest_temporal_page(
     request: Request,
     filtres: list[str] = Query(default=[]),
     leverage: float = 30.0,
     tp: float = 1.4,
     sl: float = 2.0,
-    latency_seconds: int = DEFAULT_LATENCY_SECONDS,
+    date_debut: str | None = None,
+    date_fin: str | None = None,
+    heure_debut: str = "00:00",
+    heure_fin: str = "23:59",
     btc_ok: bool = Query(default=True),
     btc_reprise: bool = Query(default=True),
     btc_faible: bool = Query(default=True),
 ) -> HTMLResponse:
-    """Comparaison backtest optimiste (analysis_time) vs réaliste (+latence)."""
+    """Backtest temporel — même vue que l'historique + filtres date/heure."""
     filtres_norm = _normalize_backtest_filtres(filtres)
     etats = _normalize_backtest_etats(
         btc_ok=btc_ok,
         btc_reprise=btc_reprise,
         btc_faible=btc_faible,
     )
+    temporal = resolve_temporal_filter(
+        date_debut=date_debut,
+        date_fin=date_fin,
+        heure_debut=heure_debut,
+        heure_fin=heure_fin,
+    )
     templates = request.app.state.templates
     conn = db_manager.connect()
     try:
-        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm, etats=etats)
+        flashes = _fetch_backtest_flashes_temporal(
+            conn, filtres=filtres_norm, etats=etats, temporal=temporal
+        )
     finally:
         conn.close()
     return templates.TemplateResponse(
         request,
-        "backtest_latency.html",
+        "backtest_temporal.html",
         {
             "request": request,
             "flashes": flashes,
@@ -1135,64 +1423,102 @@ def backtest_latency_page(
             "leverage": leverage,
             "tp": tp,
             "sl": sl,
-            "latency_seconds": latency_seconds,
             "btc_ok": btc_ok,
             "btc_reprise": btc_reprise,
             "btc_faible": btc_faible,
-            "price_granularity": PRICE_GRANULARITY,
+            "date_debut": temporal.date_debut.isoformat(),
+            "date_fin": temporal.date_fin.isoformat(),
+            "heure_debut": temporal.heure_debut,
+            "heure_fin": temporal.heure_fin,
+            "period_summary": temporal_period_summary(temporal, len(flashes)),
+            "interval_label": temporal_interval_label(temporal),
         },
     )
 
 
-@router.post("/backtest/latency/run")
-def backtest_latency_run(body: BacktestLatencyRunRequest) -> JSONResponse:
-    """Double simulation latence pour tous les flashs filtrés."""
+@router.post("/backtest/tempo/run")
+def backtest_temporal_run(body: BacktestTemporalRunRequest) -> JSONResponse:
+    """Simulation batch sur le sous-ensemble temporel filtré."""
     filtres_norm = _normalize_backtest_filtres(body.filtres)
     etats = _normalize_backtest_etats(
         btc_ok=body.btc_ok,
         btc_reprise=body.btc_reprise,
         btc_faible=body.btc_faible,
     )
-    conn = db_manager.connect()
-    try:
-        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm, etats=etats)
-    finally:
-        conn.close()
-
-    sim_signals: list[dict[str, Any]] = []
-    for flash in flashes:
-        if not _include_flash_in_backtest_sim(flash, etats):
-            continue
-        sim_signals.append(flash)
-
-    klines_by_key: dict[str, list] = {}
-    for flash in sim_signals:
-        token = str(flash["token"])
-        signal_ts = str(flash.get("signal_time_utc") or flash.get("flash_ts") or "")
-        if not signal_ts:
-            continue
-        key = f"{token}|{signal_ts}"
-        if key in klines_by_key:
-            continue
-        rows = _fetch_klines_for_flash(
-            symbol=token,
-            flash_ts=signal_ts,
-            leverage=body.leverage,
-            tp=body.tp,
-            sl=body.sl,
-        )
-        if rows:
-            klines_by_key[key] = rows
-
-    report = compare_latency_modes(
-        sim_signals,
-        klines_by_key,
-        leverage=body.leverage,
-        tp_pct=body.tp,
-        sl_pct=body.sl,
-        latency_seconds=body.latency_seconds,
+    temporal = resolve_temporal_filter(
+        date_debut=body.date_debut,
+        date_fin=body.date_fin,
+        heure_debut=body.heure_debut,
+        heure_fin=body.heure_fin,
     )
-    return JSONResponse(report)
+    raw_rows = _run_backtest_temporal_simulation(
+        filtres=filtres_norm,
+        etats=etats,
+        leverage=body.leverage,
+        tp=body.tp,
+        sl=body.sl,
+        temporal=temporal,
+    )
+    stats = _compute_backtest_stats(raw_rows)
+    resultats = []
+    for r in raw_rows:
+        c = dict(r)
+        c.pop("_pnl_raw", None)
+        c.pop("_pnl_all", None)
+        resultats.append(c)
+    return JSONResponse(
+        {
+            "resultats": resultats,
+            "stats": stats,
+            "period_summary": temporal_period_summary(temporal, len(resultats)),
+            "interval_label": temporal_interval_label(temporal),
+        }
+    )
+
+
+@router.get("/backtest/tempo/export.csv")
+def backtest_temporal_export_csv(
+    filtres: list[str] = Query(default=[]),
+    leverage: float = Query(30.0, ge=1, le=50),
+    tp: float = Query(1.4, ge=0.1, le=50),
+    sl: float = Query(2.0, ge=0.1, le=20),
+    date_debut: str | None = None,
+    date_fin: str | None = None,
+    heure_debut: str = "00:00",
+    heure_fin: str = "23:59",
+    btc_ok: bool = Query(default=True),
+    btc_reprise: bool = Query(default=True),
+    btc_faible: bool = Query(default=True),
+) -> Response:
+    """Export CSV backtest temporel : simulation batch, colonnes du tableau uniquement."""
+    filtres_norm = _normalize_backtest_filtres(filtres)
+    etats = _normalize_backtest_etats(
+        btc_ok=btc_ok,
+        btc_reprise=btc_reprise,
+        btc_faible=btc_faible,
+    )
+    temporal = resolve_temporal_filter(
+        date_debut=date_debut,
+        date_fin=date_fin,
+        heure_debut=heure_debut,
+        heure_fin=heure_fin,
+    )
+    sim_rows = _run_backtest_temporal_simulation(
+        filtres=filtres_norm,
+        etats=etats,
+        leverage=leverage,
+        tp=tp,
+        sl=sl,
+        temporal=temporal,
+    )
+    csv_rows = [_backtest_table_csv_row(r) for r in sim_rows]
+    content = _build_backtest_csv(csv_rows, fieldnames=_BACKTEST_TABLE_CSV_FIELDS)
+    filename = _backtest_tempo_csv_filename()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def register_png_url_filter(templates, captures_dir: Path) -> None:

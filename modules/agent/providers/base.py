@@ -56,5 +56,6 @@ class VisionProvider(ABC):
         prompt: str,
         *,
         context: AnalyzeContext | None = None,
+        temperature: float | None = None,
     ) -> VisionResult:
         """Analyse une image avec le prompt fourni."""

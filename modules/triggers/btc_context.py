@@ -26,36 +26,46 @@ BTC_TIMEFRAME = "4h"
 BTC_TOKEN = "BTCUSDT"
 BTC_SCHEDULED_DECISION = "BTC H4 SCAN"
 BACKFILL_VISUEL_SOURCE = db_manager.BACKFILL_VISUEL_SOURCE
+# Écart max entre btc_h4_snapshot (fin analyse) et timestamp du PNG (début capture).
+BTC_CHART_MATCH_MAX_SECONDS = 180
+
+_PNG_TS_RE = re.compile(r"BTCUSDT\.P_4h_(\d{8})_(\d{6})\.png$", re.IGNORECASE)
 
 _BTC_COLUMNS: tuple[tuple[str, str], ...] = (
     ("btc_above_tenkan", "INTEGER"),
     ("btc_tenkan_slope", "TEXT"),
     ("btc_context_score", "INTEGER"),
     ("btc_h4_snapshot", "TEXT"),
+    ("btc_chart_path", "TEXT"),
 )
 
-_BTC_PROMPT = """Tu es un analyste technique expert Ichimoku.
-Analyse ce chart BTC/USDT H4.
-
-Évalue ces 2 critères Ichimoku :
+_BTC_PROMPT = """Tu es un analyste technique expert Ichimoku, extrêmement rigoureux et pessimiste.
+Tu préfères rater un trade plutôt que de valider un faux signal.
+Analyse ce graphique BTC/USDT H4 avec la plus grande sévérité visuelle.
 
 Critère 1 — Position du Close :
-- Le Close est-il AU-DESSUS de la Tenkan-sen ?
+- Le prix (clôture de la dernière bougie) est-il STRICTEMENT au-dessus de la Tenkan-sen (ligne bleue) ?
+- Si le prix touche la ligne, hésite sur le fil, ou la chevauche visuellement -> NON.
 
-Critère 2 — Orientation de la Tenkan-sen :
-- La Tenkan-sen est-elle orientée à la HAUSSE sur les 3 dernières bougies ?
-  (hausse = pente montante claire, pas flat, pas ambiguë)
+Critère 2 — Orientation de la Tenkan-sen (Zéro Tolérance pour le Flat) :
+- Sur les 3-4 dernières bougies, la Tenkan monte-t-elle de façon NETTE, CONTINUE et INCESSANTE ?
+- RÈGLE ABSOLUE : Si la ligne forme un palier horizontal (plateau), même léger, ou s'aplatit sur la dernière bougie -> "flat".
 
-Scoring strict (total /10) :
-- Close > Tenkan H4 → +5 pts
-- Tenkan pente haussière → +5 pts
+Scoring drastique :
+- Critère 1 validé -> +5 pts (sinon 0)
+- Critère 2 validé (hausse claire, aucun plat) -> +5 pts (sinon 0)
 
-Réponds UNIQUEMENT en JSON valide, aucun texte autour :
+Règle impérative pour context_score :
+- 10 : UNIQUEMENT si le prix pousse ET la Tenkan monte (momentum).
+- 5  : si le prix est au-dessus MAIS la Tenkan est plate, neutre ou baissière.
+- 0  : si le prix est sous ou sur la Tenkan.
+
+Réponds UNIQUEMENT sous forme de bloc JSON valide, sans markdown autour (pas de ```json), respectant strictement ce format :
 {
+  "resume": "Analyse visuelle obligatoire de la forme exacte de la Tenkan (ex: plate, en escalier stable, ou inclinée vers le haut). Mentionner si le prix chevauche la ligne.",
   "above_tenkan": true,
   "tenkan_slope": "up",
-  "context_score": 10,
-  "resume": "1 phrase max décrivant le contexte BTC H4"
+  "context_score": 10
 }
 
 Valeurs autorisées :
@@ -105,9 +115,18 @@ def _empty_btc_result() -> BtcAnalysisResult:
     )
 
 
+def _strip_markdown_fence(text: str) -> str:
+    """Retire un éventuel bloc ```json ... ``` si le modèle l'ajoute malgré le prompt."""
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+    return raw.strip()
+
+
 def _extract_json_block(text: str) -> dict | None:
     """Extrait un objet JSON depuis la réponse Gemini."""
-    raw = (text or "").strip()
+    raw = _strip_markdown_fence(text)
     if not raw:
         return None
     try:
@@ -174,6 +193,14 @@ def parse_btc_h4_response(text: str) -> BtcAnalysisResult:
 
 def analyze_btc_h4(image_path: Path) -> BtcAnalysisResult:
     """Analyse vision BTC H4 via Gemini. Ne lève jamais (retourne null si échec)."""
+    text = analyze_btc_h4_prompt(image_path, _BTC_PROMPT)
+    if not text:
+        return _empty_btc_result()
+    return parse_btc_h4_response(text)
+
+
+def analyze_btc_h4_prompt(image_path: Path, prompt: str) -> str | None:
+    """Pipeline vision identique au dashboard BTC H4 — prompt libre, texte brut Gemini."""
     try:
         symbol_tv = resolve_symbol_tv(BTC_TOKEN)
         layout_id = resolve_layout(BTC_AGENT_ID)
@@ -184,11 +211,11 @@ def analyze_btc_h4(image_path: Path) -> BtcAnalysisResult:
             timeframe_label="H4",
             layout_id=layout_id,
         )
-        vision = analyze_with_strategy(image_path, _BTC_PROMPT, context=context)
-        return parse_btc_h4_response(vision.text)
+        vision = analyze_with_strategy(image_path, prompt, context=context)
+        return vision.text
     except Exception as exc:
         logger.error("❌ Analyse BTC H4 Gemini échouée (non bloquant) : %s", exc)
-        return _empty_btc_result()
+        return None
 
 
 def _parse_snapshot_iso(value: str) -> datetime | None:
@@ -201,12 +228,50 @@ def _parse_snapshot_iso(value: str) -> datetime | None:
         return None
 
 
+def _png_path_to_dt(path: Path) -> datetime | None:
+    """Extrait le timestamp UTC du nom ``BTCUSDT.P_4h_YYYYMMDD_HHMMSS.png``."""
+    match = _PNG_TS_RE.search(path.name)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(
+            match.group(1) + match.group(2),
+            "%Y%m%d%H%M%S",
+        ).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _snapshot_iso_from_png(png: Path) -> str:
+    """Horodatage aligné sur la capture PNG (pas la fin de l'analyse Gemini)."""
+    dt = _png_path_to_dt(png)
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    return dt.isoformat(timespec="seconds")
+
+
+def _find_nearest_btc_png(agent_dir: Path, target: datetime) -> Path | None:
+    """PNG BTC H4 le plus proche de ``target`` (tolérance ``BTC_CHART_MATCH_MAX_SECONDS``)."""
+    best: Path | None = None
+    best_delta = BTC_CHART_MATCH_MAX_SECONDS + 1.0
+    for png in agent_dir.glob("BTCUSDT.P_4h_*.png"):
+        png_dt = _png_path_to_dt(png)
+        if png_dt is None:
+            continue
+        delta = abs((png_dt - target).total_seconds())
+        if delta <= BTC_CHART_MATCH_MAX_SECONDS and delta < best_delta:
+            best_delta = delta
+            best = png
+    return best
+
+
 def update_btc_context(
     conn: sqlite3.Connection,
     *,
     analyse_id: int,
     result: BtcAnalysisResult,
     snapshot_iso: str,
+    chart_path: str | None = None,
 ) -> bool:
     """Enregistre le contexte BTC sur une analyse existante."""
     above = None if result.above_tenkan is None else int(result.above_tenkan)
@@ -216,7 +281,8 @@ def update_btc_context(
         SET btc_above_tenkan = ?,
             btc_tenkan_slope = ?,
             btc_context_score = ?,
-            btc_h4_snapshot = ?
+            btc_h4_snapshot = ?,
+            btc_chart_path = ?
         WHERE id = ?
         """,
         (
@@ -224,6 +290,7 @@ def update_btc_context(
             result.tenkan_slope,
             result.context_score,
             snapshot_iso,
+            chart_path,
             analyse_id,
         ),
     )
@@ -245,7 +312,8 @@ def run_btc_h4_context(analyse_id: int) -> int | None:
 
         png = capture_btc_h4_chart()
         result = analyze_btc_h4(png)
-        snapshot = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        snapshot = _snapshot_iso_from_png(png)
+        chart_path = str(png.resolve())
 
         conn = db_manager.connect()
         try:
@@ -254,6 +322,7 @@ def run_btc_h4_context(analyse_id: int) -> int | None:
                 analyse_id=analyse_id,
                 result=result,
                 snapshot_iso=snapshot,
+                chart_path=chart_path,
             )
         finally:
             conn.close()
@@ -466,7 +535,47 @@ def read_btc_fields_from_row(row: sqlite3.Row) -> dict:
         "btc_tenkan_slope": row["btc_tenkan_slope"] if "btc_tenkan_slope" in keys else None,
         "btc_context_score": row["btc_context_score"] if "btc_context_score" in keys else None,
         "btc_h4_snapshot": row["btc_h4_snapshot"] if "btc_h4_snapshot" in keys else None,
+        "btc_chart_path": row["btc_chart_path"] if "btc_chart_path" in keys else None,
     }
+
+
+def resolve_btc_chart_path(
+    row: sqlite3.Row,
+    *,
+    captures_dir: Path,
+) -> str | None:
+    """Chemin PNG BTC H4 lié à une analyse (DB ou recherche par snapshot)."""
+    fields = read_btc_fields_from_row(row)
+    stored = fields.get("btc_chart_path")
+    if stored:
+        path = Path(str(stored))
+        if path.is_file():
+            return str(path.resolve())
+
+    snapshot = fields.get("btc_h4_snapshot")
+    if not snapshot:
+        return None
+    dt = _parse_snapshot_iso(str(snapshot))
+    if dt is None:
+        return None
+
+    agent_dir = captures_dir / BTC_AGENT_ID
+    if not agent_dir.is_dir():
+        return None
+
+    exact = agent_dir / f"BTCUSDT.P_4h_{dt.strftime('%Y%m%d_%H%M%S')}.png"
+    if exact.is_file():
+        return str(exact.resolve())
+
+    minute_prefix = f"BTCUSDT.P_4h_{dt.strftime('%Y%m%d_%H%M')}"
+    matches = sorted(agent_dir.glob(f"{minute_prefix}*.png"), reverse=True)
+    if matches:
+        return str(matches[0].resolve())
+
+    nearest = _find_nearest_btc_png(agent_dir, dt)
+    if nearest is not None:
+        return str(nearest.resolve())
+    return None
 
 
 def is_btc_tradable(context_score: int | None) -> bool:

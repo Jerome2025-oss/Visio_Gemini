@@ -3,16 +3,50 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Visio Gemini — Backtest historique</title>
+  <title>Visio Gemini — Backtest TEMPOREL</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="wrap">
-    {% set page_title = "Backtest historique" %}
-    {% set page_subtitle = "Simulation batch sur tous les flashs Ichimoku · API bitunix simulate_one" %}
-    {% set nav_active = "backtest" %}
+    {% set page_title = "Backtest TEMPOREL" %}
+    {% set page_subtitle = "Simulation batch · plage datetime continue · API bitunix simulate_one" %}
+    {% set nav_active = "backtest-tempo" %}
     {% include "_dash_nav.html" %}
+
+    <section class="panel backtest-tempo-panel">
+      <h2 class="backtest-tempo-panel__title">Filtre temporel</h2>
+      <div class="backtest-tempo-dates">
+        <label>Date début
+          <input type="date" id="bt-date-debut" value="{{ date_debut }}">
+        </label>
+        <label>Date fin
+          <input type="date" id="bt-date-fin" value="{{ date_fin }}">
+        </label>
+        <div class="backtest-tempo-presets" role="group" aria-label="Raccourcis date">
+          <button type="button" class="backtest-tempo-preset" data-date-preset="today">Aujourd'hui</button>
+          <button type="button" class="backtest-tempo-preset" data-date-preset="yesterday">Hier</button>
+          <button type="button" class="backtest-tempo-preset" data-date-preset="7d">7 derniers jours</button>
+        </div>
+      </div>
+      <div class="backtest-tempo-hours">
+        <label>Heure début
+          <input type="time" id="bt-heure-debut" value="{{ heure_debut }}">
+        </label>
+        <label>Heure fin
+          <input type="time" id="bt-heure-fin" value="{{ heure_fin }}">
+        </label>
+        <div class="backtest-tempo-presets" role="group" aria-label="Créneaux horaires">
+          <button type="button" class="backtest-tempo-preset" data-time-start="00:00" data-time-end="08:00">Nuit 00h-08h</button>
+          <button type="button" class="backtest-tempo-preset" data-time-start="08:00" data-time-end="12:00">Matin 08h-12h</button>
+          <button type="button" class="backtest-tempo-preset" data-time-start="12:00" data-time-end="18:00">Aprèm 12h-18h</button>
+          <button type="button" class="backtest-tempo-preset" data-time-start="18:00" data-time-end="00:00">Soir 18h-00h</button>
+          <button type="button" class="backtest-tempo-preset" data-time-start="00:00" data-time-end="23:59">Tout 00h-24h</button>
+        </div>
+      </div>
+      <button type="button" id="bt-apply-tempo" class="backtest-tempo-apply">Appliquer le filtre temporel</button>
+      <p class="backtest-tempo-interval" id="bt-interval-label">{{ interval_label }}</p>
+    </section>
 
     <section class="panel backtest-controls">
       <div class="backtest-form">
@@ -59,7 +93,7 @@
             <span class="backtest-toggle__face">🔴 BTC FAIBLE</span>
           </label>
         </div>
-        <button type="button" id="bt-run" class="backtest-run-btn">⚡ Lancer la simulation sur tout l'historique</button>
+        <button type="button" id="bt-run" class="backtest-run-btn">⚡ Lancer la simulation sur la sélection</button>
         <button type="button" id="bt-export-sim" class="backtest-export-btn" title="Lance la simulation puis exporte le tableau (peut prendre plusieurs minutes)">📥 CSV + simulation</button>
         <span id="bt-spinner" class="funnel-card__meta backtest-spinner" hidden>simulation en cours…</span>
         <span id="bt-export-spin" class="funnel-card__meta backtest-spinner" hidden>export en cours…</span>
@@ -71,9 +105,9 @@
     </section>
 
     <section class="panel">
-      <p class="funnel-card__meta backtest-meta">
-        {{ flashes|length }} flash(s) dans la liste · point de départ = premier enregistrement
-        · résultats remplis après simulation
+      <p class="funnel-card__meta backtest-meta" id="bt-period-summary">{{ period_summary }}</p>
+      <p class="funnel-card__meta backtest-meta backtest-meta--sub">
+        Résultats remplis après simulation · intervalle continu (pas de coupure horaire par jour)
       </p>
       <div class="backtest-table-wrap">
         <table class="backtest-table" id="bt-table">
@@ -104,7 +138,7 @@
               <td class="bt-tp-optimal">—</td>
             </tr>
             {% else %}
-            <tr><td colspan="9" class="empty">Aucun flash dans cette sélection.</td></tr>
+            <tr><td colspan="9" class="empty">Aucun flash dans cette sélection temporelle.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -139,6 +173,29 @@
       CLO_24H:  { label: "🕐 CLÔ 24H", cls: "muted" },
       ERR:      { label: "⚠️ ERR",      cls: "muted" },
     };
+
+    function utcDateInputValue(offsetDays) {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + offsetDays);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function getTemporalParams() {
+      return {
+        date_debut: document.getElementById("bt-date-debut").value,
+        date_fin: document.getElementById("bt-date-fin").value,
+        heure_debut: document.getElementById("bt-heure-debut").value || "00:00",
+        heure_fin: document.getElementById("bt-heure-fin").value || "23:59",
+      };
+    }
+
+    function appendTemporalParams(params) {
+      const t = getTemporalParams();
+      if (t.date_debut) params.set("date_debut", t.date_debut);
+      if (t.date_fin) params.set("date_fin", t.date_fin);
+      params.set("heure_debut", t.heure_debut);
+      params.set("heure_fin", t.heure_fin);
+    }
 
     function badgeHtml(code) {
       const m = RESULT_BADGE[code] || { label: code, cls: "muted" };
@@ -241,6 +298,12 @@
         }
       });
       if (data.stats) renderStats(data.stats);
+      if (data.period_summary) {
+        document.getElementById("bt-period-summary").textContent = data.period_summary;
+      }
+      if (data.interval_label) {
+        document.getElementById("bt-interval-label").textContent = data.interval_label;
+      }
       if (window.BacktestChart) {
         BacktestChart.updateCache(data.resultats || []);
         BacktestChart.reloadSelected();
@@ -276,8 +339,9 @@
       params.set("btc_ok", etats.btc_ok ? "true" : "false");
       params.set("btc_reprise", etats.btc_reprise ? "true" : "false");
       params.set("btc_faible", etats.btc_faible ? "true" : "false");
+      appendTemporalParams(params);
       filtres.forEach((f) => params.append("filtres", f));
-      window.location.href = "/backtest?" + params.toString();
+      window.location.href = "/backtest/tempo?" + params.toString();
     }
 
     function onFiltreChange(source) {
@@ -305,6 +369,35 @@
     document.getElementById("filtre-btc-reprise").addEventListener("change", reloadWithFiltres);
     document.getElementById("filtre-btc-faible").addEventListener("change", reloadWithFiltres);
 
+    document.querySelectorAll("[data-date-preset]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const preset = btn.dataset.datePreset;
+        const debut = document.getElementById("bt-date-debut");
+        const fin = document.getElementById("bt-date-fin");
+        if (preset === "today") {
+          const d = utcDateInputValue(0);
+          debut.value = d;
+          fin.value = d;
+        } else if (preset === "yesterday") {
+          const d = utcDateInputValue(-1);
+          debut.value = d;
+          fin.value = d;
+        } else if (preset === "7d") {
+          debut.value = utcDateInputValue(-6);
+          fin.value = utcDateInputValue(0);
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-time-start]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.getElementById("bt-heure-debut").value = btn.dataset.timeStart;
+        document.getElementById("bt-heure-fin").value = btn.dataset.timeEnd;
+      });
+    });
+
+    document.getElementById("bt-apply-tempo").addEventListener("click", reloadWithFiltres);
+
     function buildExportUrl() {
       const params = new URLSearchParams();
       params.set("leverage", document.getElementById("bt-leverage").value);
@@ -314,8 +407,9 @@
       params.set("btc_ok", etats.btc_ok ? "true" : "false");
       params.set("btc_reprise", etats.btc_reprise ? "true" : "false");
       params.set("btc_faible", etats.btc_faible ? "true" : "false");
+      appendTemporalParams(params);
       getActiveFiltres().forEach((f) => params.append("filtres", f));
-      return "/backtest/export.csv?" + params.toString();
+      return "/backtest/tempo/export.csv?" + params.toString();
     }
 
     function triggerCsvExport() {
@@ -342,7 +436,8 @@
       btn.disabled = true;
       spin.hidden = false;
       try {
-        const resp = await fetch("/backtest/run", {
+        const temporal = getTemporalParams();
+        const resp = await fetch("/backtest/tempo/run", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({
@@ -351,6 +446,7 @@
             sl: parseFloat(document.getElementById("bt-sl").value),
             filtres: getActiveFiltres(),
             ...getActiveEtats(),
+            ...temporal,
           }),
         });
         if (!resp.ok) throw new Error("HTTP " + resp.status);

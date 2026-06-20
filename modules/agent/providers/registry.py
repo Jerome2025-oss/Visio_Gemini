@@ -27,10 +27,13 @@ def analyze_with_strategy(
     *,
     context: AnalyzeContext | None = None,
     strategy: str | None = None,
+    temperature: float | None = None,
 ) -> VisionResult:
     """Analyse vision via API Mammouth (paramètre strategy ignoré, rétrocompat)."""
     _ = strategy
-    return get_provider("mammouth").analyze(image_path, prompt, context=context)
+    return get_provider("mammouth").analyze(
+        image_path, prompt, context=context, temperature=temperature
+    )
 
 
 def analyze_multi_with_strategy(
