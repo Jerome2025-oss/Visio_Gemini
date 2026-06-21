@@ -1,0 +1,13 @@
+[Unit]
+Description=Visio Gemini — Date ON/OFF BTC (capture Ten Kan + Gemini)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/Visio_Gemini
+EnvironmentFile=/root/Visio_Gemini/.env
+ExecStart=/root/Visio_Gemini/.venv/bin/python -m modules.schedulers.btc_regime_scheduled
+StandardOutput=journal
+StandardError=journal

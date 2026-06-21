@@ -1236,6 +1236,24 @@ th {
   gap: 1rem;
 }
 
+.btc-regime-days-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.btc-regime-days-input {
+  width: 4rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font-size: 0.9rem;
+}
+
 .btc-regime-meta,
 .btc-regime-status {
   font-size: 0.85rem;
@@ -1298,4 +1316,138 @@ th {
 
 .btc-regime-row--red {
   background: rgba(239, 68, 68, 0.03);
+}
+
+.btc-regime-days-hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0 0 0.85rem;
+}
+
+.btc-regime-days {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.btc-regime-days-empty {
+  margin: 0;
+  padding: 1rem 0;
+}
+
+.btc-regime-day {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.btc-regime-day[open] {
+  border-color: rgba(103, 232, 249, 0.25);
+}
+
+.btc-regime-day__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  padding: 0.65rem 0.85rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.btc-regime-day__summary::-webkit-details-marker {
+  display: none;
+}
+
+.btc-regime-day__chev {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btc-regime-day[open] .btc-regime-day__chev {
+  transform: rotate(45deg);
+}
+
+.btc-regime-day__date {
+  font-weight: 600;
+  min-width: 5.5rem;
+}
+
+.btc-regime-day__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.btc-regime-day__head-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.btc-regime-day__timeline {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.btc-regime-slot-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.btc-regime-slot-dot--green {
+  background: #22c55e;
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.35);
+}
+
+.btc-regime-slot-dot--red {
+  background: #ef4444;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35);
+}
+
+.btc-regime-slot-dot--yellow {
+  background: #eab308;
+  box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.35);
+}
+
+.btc-regime-slot-dot--muted {
+  background: #64748b;
+}
+
+.btc-regime-day__counts {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.btc-regime-day__detail {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0 0.5rem 0.35rem;
+}
+
+.btc-regime-table--detail {
+  font-size: 0.84rem;
+}
+
+.btc-regime-table--detail th,
+.btc-regime-table--detail td {
+  padding: 0.4rem 0.55rem;
+}
+
+@media (max-width: 640px) {
+  .btc-regime-day__counts {
+    margin-left: 0;
+    width: 100%;
+  }
 }

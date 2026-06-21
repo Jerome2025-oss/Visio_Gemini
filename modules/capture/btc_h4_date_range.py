@@ -24,9 +24,9 @@ BTC_REGIME_LAYOUT_ID = "NGeeKEid"
 logger = logging.getLogger("visio_gemini.capture.btc_h4_date_range")
 
 # ── Paramètres configurables ───────────────────────────────────
-DAYS_WINDOW = 17       # cadrage de référence : ~17j ≈ ~100 bougies H4
-MIN_DAYS = 16
-MAX_DAYS = 18
+DAYS_WINDOW = 5        # fenêtre par défaut (mode incrémental / test)
+MIN_DAYS = 5
+MAX_DAYS = 30
 TIMEFRAME = "4h"
 WAIT_AFTER_ZOOM = 1.5  # secondes
 

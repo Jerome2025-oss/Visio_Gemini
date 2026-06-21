@@ -621,7 +621,24 @@ def _btc_regime_page_context() -> dict[str, Any]:
 def _btc_regime_run_response(result: dict[str, Any]) -> dict[str, Any]:
     ctx = _btc_regime_page_context()
     chart_url = _btc_regime_chart_url(result.get("chart_path")) or ctx.get("chart_url", "")
-    return {**result, **ctx, "chart_url": chart_url}
+    return {**ctx, **result, "chart_url": chart_url}
+
+
+class BtcRegimeRunRequest(BaseModel):
+    days_window: int | None = None
+
+
+@router.post("/btc-dates-onoff/run")
+def btc_dates_onoff_run(body: BtcRegimeRunRequest | None = None) -> JSONResponse:
+    """Relance capture + analyse Gemini et upsert incrémental du tableau."""
+    days_window = btc_regime_dates.resolve_days_window(
+        body.days_window if body else None
+    )
+    result = btc_regime_dates.run_regime_dates_update(days_window=days_window)
+    payload = _btc_regime_run_response(result)
+    if not result.get("ok"):
+        return JSONResponse(payload, status_code=502)
+    return JSONResponse(payload)
 
 
 @router.get("/btc-dates-onoff", response_class=HTMLResponse)
@@ -635,23 +652,16 @@ def btc_dates_onoff_page(request: Request) -> HTMLResponse:
         {
             "request": request,
             **ctx,
+            "days_window_default": btc_regime_dates.DAYS_WINDOW,
+            "days_window_min": btc_regime_dates.MIN_DAYS,
+            "days_window_max": btc_regime_dates.MAX_DAYS,
         },
     )
 
 
-@router.post("/btc-dates-onoff/run")
-def btc_dates_onoff_run() -> JSONResponse:
-    """Relance capture + analyse Gemini et remplace le tableau."""
-    result = btc_regime_dates.run_regime_dates_update()
-    payload = _btc_regime_run_response(result)
-    if not result.get("ok"):
-        return JSONResponse(payload, status_code=502)
-    return JSONResponse(payload)
-
-
 @router.get("/btc-dates-onoff/data")
 def btc_dates_onoff_data() -> JSONResponse:
-    """Données JSON du tableau (dernier run)."""
+    """Données JSON du tableau (historique accumulé)."""
     return JSONResponse(_btc_regime_page_context())
 
 

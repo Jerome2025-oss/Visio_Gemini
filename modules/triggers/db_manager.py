@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -93,6 +94,11 @@ CREATE INDEX IF NOT EXISTS idx_btc_regime_dates_run
     ON btc_regime_dates (run_id, sort_order);
 """
 
+_BTC_REGIME_DATES_SLOT_UNIQUE = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_btc_regime_dates_date_heure_unique
+    ON btc_regime_dates (date_range, heure);
+"""
+
 _BTC_REGIME_STATE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS btc_regime_state (
     id          INTEGER PRIMARY KEY CHECK (id = 1),
@@ -107,6 +113,7 @@ _BTC_REGIME_MIGRATE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("transition", "TEXT"),
     ("transition_note", "INTEGER"),
     ("zone", "TEXT"),
+    ("heure", "TEXT"),
 )
 
 
@@ -203,7 +210,83 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE btc_regime_dates ADD COLUMN {name} {col_type}")
             conn.commit()
             logger.info("🧱 Migration btc_regime_dates : colonne %s ajoutée.", name)
+    _drop_legacy_usdtd_regime_tables(conn)
+    _migrate_btc_regime_dates_slot_unique(conn)
     _migrate_scores_from_recap(conn)
+
+
+def _migrate_btc_regime_dates_slot_unique(conn: sqlite3.Connection) -> None:
+    """Colonne heure + index UNIQUE (date_range, heure) pour UPSERT par créneau 4h."""
+    has_slot_unique = conn.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='index' AND name='idx_btc_regime_dates_date_heure_unique'
+        """
+    ).fetchone()
+    if has_slot_unique:
+        return
+
+    if not _column_exists(conn, "btc_regime_dates", "heure"):
+        conn.execute(
+            "ALTER TABLE btc_regime_dates ADD COLUMN heure TEXT NOT NULL DEFAULT '00H00'"
+        )
+        conn.commit()
+        logger.info("🧱 Migration btc_regime_dates : colonne heure ajoutée.")
+
+    conn.execute("DROP INDEX IF EXISTS idx_btc_regime_dates_date_unique")
+    conn.commit()
+
+    rows = conn.execute(
+        "SELECT id, date_range, zone, heure FROM btc_regime_dates"
+    ).fetchall()
+    zone_to_heure = {
+        "debut": "00H00",
+        "midi": "12H00",
+        "milieu": "12H00",
+        "fin": "20H00",
+    }
+    for row in rows:
+        date_raw = str(row["date_range"] or "").strip()
+        date_norm = re.sub(r"^(\d{1,2})\s+", r"\1-", date_raw, count=1)
+        zone = str(row["zone"] or "").strip().lower()
+        heure_raw = str(row["heure"] or "").strip()
+        if heure_raw and heure_raw != "00H00":
+            heure_norm = heure_raw.upper().replace(" ", "")
+            m = re.match(r"^(\d{1,2})H(\d{2})$", heure_norm)
+            heure_norm = f"{int(m.group(1)):02d}H{m.group(2)}" if m else "00H00"
+        else:
+            heure_norm = zone_to_heure.get(zone, "00H00")
+        conn.execute(
+            "UPDATE btc_regime_dates SET date_range = ?, heure = ? WHERE id = ?",
+            (date_norm, heure_norm, row["id"]),
+        )
+    conn.commit()
+
+    conn.execute(
+        """
+        DELETE FROM btc_regime_dates
+        WHERE id NOT IN (
+            SELECT MAX(id) FROM btc_regime_dates GROUP BY date_range, heure
+        )
+        """
+    )
+    conn.executescript(_BTC_REGIME_DATES_SLOT_UNIQUE)
+    conn.commit()
+    logger.info(
+        "🧱 Migration btc_regime_dates : index UNIQUE (date_range, heure) pour créneaux 4h."
+    )
+
+
+def _drop_legacy_usdtd_regime_tables(conn: sqlite3.Connection) -> None:
+    """Supprime les tables USDT.D Date ON/OFF (feature retirée)."""
+    for table in ("analyses_usdtd", "analyses_usdtd_state"):
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone():
+            conn.execute(f"DROP TABLE {table}")
+            conn.commit()
+            logger.info("🧹 Table legacy supprimée : %s", table)
 
 
 def _migrate_scores_from_recap(conn: sqlite3.Connection) -> None:
@@ -556,22 +639,29 @@ def fetch_btc_regime_dates(
     *,
     run_id: str | None = None,
 ) -> list[sqlite3.Row]:
-    """Lignes du tableau Date ON/OFF (dernier run par défaut)."""
-    if run_id is None:
-        run_id = fetch_latest_btc_regime_run_id(conn)
-    if not run_id:
-        return []
+    """Toutes les lignes Date ON/OFF accumulées (historique), tri chronologique."""
+    if run_id is not None:
+        return conn.execute(
+            """
+            SELECT id, date_range, heure, etat, zone, transition, transition_note,
+                   avg_price, above_tenkan, position_label,
+                   context_score, verdict, justification, run_id, chart_path,
+                   sort_order, created_at
+            FROM btc_regime_dates
+            WHERE run_id = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (run_id,),
+        ).fetchall()
     return conn.execute(
         """
-        SELECT id, date_range, etat, zone, transition, transition_note,
+        SELECT id, date_range, heure, etat, zone, transition, transition_note,
                avg_price, above_tenkan, position_label,
                context_score, verdict, justification, run_id, chart_path,
                sort_order, created_at
         FROM btc_regime_dates
-        WHERE run_id = ?
         ORDER BY sort_order ASC, id ASC
-        """,
-        (run_id,),
+        """
     ).fetchall()
 
 
@@ -593,13 +683,14 @@ def fetch_btc_regime_meta(conn: sqlite3.Connection) -> dict[str, str | None]:
     ).fetchone()
     row = conn.execute(
         """
-        SELECT run_id, chart_path, created_at,
-               (SELECT COUNT(*) FROM btc_regime_dates r2 WHERE r2.run_id = r1.run_id) AS n_rows
-        FROM btc_regime_dates r1
+        SELECT run_id, chart_path, created_at
+        FROM btc_regime_dates
         ORDER BY id DESC
         LIMIT 1
         """
     ).fetchone()
+    total_row = conn.execute("SELECT COUNT(*) AS n FROM btc_regime_dates").fetchone()
+    n_total = str(total_row["n"]) if total_row else "0"
     chart_path = (state["chart_path"] if state else None) or (row["chart_path"] if row else None)
     if not row and not state:
         return {"run_id": None, "chart_path": None, "created_at": None, "n_rows": "0", "last_error": None}
@@ -607,7 +698,7 @@ def fetch_btc_regime_meta(conn: sqlite3.Connection) -> dict[str, str | None]:
         "run_id": str(row["run_id"]) if row else None,
         "chart_path": chart_path,
         "created_at": (row["created_at"] if row else None) or (state["last_run_at"] if state else None),
-        "n_rows": str(row["n_rows"]) if row else "0",
+        "n_rows": n_total,
         "last_error": state["last_error"] if state else None,
     }
 
@@ -634,6 +725,74 @@ def save_btc_regime_state(
     conn.commit()
 
 
+def prune_future_btc_regime_slots(
+    conn: sqlite3.Connection,
+    now: datetime | None = None,
+) -> int:
+    """Supprime les créneaux H4 du jour courant (ou futurs) pas encore commencés (UTC)."""
+    from modules.triggers.btc_regime_dates import is_slot_persistable
+
+    now = now or _utcnow()
+    rows = conn.execute(
+        "SELECT id, date_range, heure FROM btc_regime_dates"
+    ).fetchall()
+    removed = 0
+    for row in rows:
+        if not is_slot_persistable(str(row["date_range"]), str(row["heure"]), now):
+            conn.execute("DELETE FROM btc_regime_dates WHERE id = ?", (row["id"],))
+            removed += 1
+    if removed:
+        conn.commit()
+        logger.info("🧹 Date ON/OFF : %s créneau(x) futur(s) retiré(s).", removed)
+    return removed
+
+
+def upsert_btc_regime_dates(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    chart_path: str | None,
+    rows: list[dict],
+) -> tuple[int, int]:
+    """INSERT incrémental par (date_range, heure) — ignore les clés déjà présentes."""
+    now = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    inserted = 0
+    for row in rows:
+        date_label = str(row["date"]).strip()
+        heure = str(row.get("heure") or "00H00").strip()
+        sort_order = row.get("sort_order")
+        if sort_order is None:
+            sort_order = 0
+        cur = conn.execute(
+            """
+            INSERT INTO btc_regime_dates (
+                date_range, heure, etat, zone, transition, transition_note,
+                avg_price, above_tenkan, position_label,
+                context_score, verdict, justification,
+                run_id, chart_path, sort_order, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, 'OFF', NULL, ?, ?, ?, ?)
+            ON CONFLICT(date_range, heure) DO NOTHING
+            """,
+            (
+                date_label,
+                heure,
+                row.get("etat"),
+                row.get("zone"),
+                row.get("transition"),
+                row.get("transition_note"),
+                run_id,
+                chart_path,
+                int(sort_order),
+                now,
+            ),
+        )
+        if cur.rowcount > 0:
+            inserted += 1
+    conn.commit()
+    total = conn.execute("SELECT COUNT(*) AS n FROM btc_regime_dates").fetchone()
+    return inserted, int(total["n"]) if total else 0
+
+
 def replace_btc_regime_dates(
     conn: sqlite3.Connection,
     *,
@@ -641,32 +800,8 @@ def replace_btc_regime_dates(
     chart_path: str | None,
     rows: list[dict],
 ) -> int:
-    """Remplace tout le tableau par un nouveau run (analyse complète)."""
-    now = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute("DELETE FROM btc_regime_dates")
-    inserted = 0
-    for idx, row in enumerate(rows):
-        conn.execute(
-            """
-            INSERT INTO btc_regime_dates (
-                date_range, etat, zone, transition, transition_note,
-                avg_price, above_tenkan, position_label,
-                context_score, verdict, justification,
-                run_id, chart_path, sort_order, created_at
-            ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, 0, 'OFF', NULL, ?, ?, ?, ?)
-            """,
-            (
-                row["date"],
-                row.get("etat"),
-                row.get("zone"),
-                row.get("transition"),
-                row.get("transition_note"),
-                run_id,
-                chart_path,
-                idx,
-                now,
-            ),
-        )
-        inserted += 1
-    conn.commit()
-    return inserted
+    """Délègue à upsert (compat) — ne remplace plus tout le tableau."""
+    touched, _total = upsert_btc_regime_dates(
+        conn, run_id=run_id, chart_path=chart_path, rows=rows
+    )
+    return touched

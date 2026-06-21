@@ -1,0 +1,15 @@
+[Unit]
+Description=Date ON/OFF BTC — 6x par jour (H4 + 2 min UTC)
+
+[Timer]
+OnCalendar=*-*-* 00:02:00 UTC
+OnCalendar=*-*-* 04:02:00 UTC
+OnCalendar=*-*-* 08:02:00 UTC
+OnCalendar=*-*-* 12:02:00 UTC
+OnCalendar=*-*-* 16:02:00 UTC
+OnCalendar=*-*-* 20:02:00 UTC
+Persistent=true
+Unit=visio-gemini-btc-regime.service
+
+[Install]
+WantedBy=timers.target

@@ -9,17 +9,30 @@
 <body>
   <div class="wrap">
     {% set page_title = "Date ON/OFF" %}
-    {% set page_subtitle = "Ligne cyan vs bloc bleu · 1 jour = 1 trait vertical · layout Ten Kan" %}
+      {% set page_subtitle = "Nuage bleu seul vs vert+bleu · 6 créneaux H4/jour · layout Ten Kan" %}
     {% set nav_active = "btc-dates-onoff" %}
     {% include "_dash_nav.html" %}
 
     <section class="panel btc-regime-controls">
       <div class="btc-regime-toolbar">
         <div class="btc-regime-legend funnel-card__meta">
-          <span><i class="dot dot-green"></i> OUI = ligne au-dessus du bloc</span>
-          <span><i class="dot dot-red"></i> NON = ligne dans/sous le bloc</span>
-          <span><i class="dot dot-yellow"></i> LIMITE = ligne au bord</span>
+          <span><i class="dot dot-green"></i> OUI = bleu seul (un nuage)</span>
+          <span><i class="dot dot-red"></i> NON = vert et bleu visibles (deux nuages)</span>
+          <span><i class="dot dot-yellow"></i> LIMITE = cas ambigu</span>
         </div>
+        <label class="btc-regime-days-field" for="regime-days-window">
+          Jours visibles
+          <input
+            type="number"
+            id="regime-days-window"
+            class="btc-regime-days-input"
+            min="{{ days_window_min | default(5) }}"
+            max="{{ days_window_max | default(30) }}"
+            value="{{ days_window_default | default(5) }}"
+            step="1"
+            title="Fenêtre Date Range TradingView (days_window)"
+          >
+        </label>
         <button type="button" id="btn-regime-update" class="backtest-run-btn btc-regime-update">
           ⚡ Mettre à jour le tableau
         </button>
@@ -38,7 +51,7 @@
 
     {% if chart_url %}
     <section class="panel btc-regime-chart" id="regime-chart-panel">
-      <h2 class="btc-regime-chart__title">Chart source (Ten Kan · ligne cyan + bloc bleu + grille verticale)</h2>
+      <h2 class="btc-regime-chart__title">Chart source (Ten Kan · nuages bleu/vert + colonnes verticales)</h2>
       <a id="regime-chart-link" href="{{ chart_url }}" target="_blank" rel="noopener">
         <img class="btc-regime-chart__img" id="regime-chart-img" src="{{ chart_url }}" alt="BTC H4 capture Ten Kan">
       </a>
@@ -48,58 +61,66 @@
     {% endif %}
 
     <section class="panel">
-      <h2>États jour par jour</h2>
-      <div class="table-wrap">
-        <table class="btc-regime-table" id="regime-table">
-            <thead>
-            <tr>
-              <th>Date</th>
-              <th>Zone</th>
-              <th>État</th>
-              <th>Transition</th>
-              <th>Note</th>
-            </tr>
-          </thead>
-          <tbody id="regime-tbody">
-            {% if rows %}
-            {% for r in rows %}
-            <tr class="btc-regime-row btc-regime-row--{{ r.etat_color }}">
-              <td>{{ r.date }}</td>
-              <td>{{ r.zone }}</td>
-              <td><span class="badge badge-{{ r.etat_color }}">{{ r.etat }}</span></td>
-              <td>{{ r.transition }}</td>
-              <td>{{ r.note_display }}</td>
-            </tr>
-            {% endfor %}
-            {% else %}
-            <tr id="regime-empty">
-              <td colspan="5" class="empty">Tableau vide — lance une mise à jour.</td>
-            </tr>
-            {% endif %}
-          </tbody>
-        </table>
+      <h2>États par jour</h2>
+      <p class="btc-regime-days-hint">Clique sur un jour (ligne 00H00) pour voir les 6 créneaux H4.</p>
+      <div class="btc-regime-days" id="regime-days">
+        {% if rows %}
+        {% for day, day_rows in rows|groupby('date') %}
+        {% set slots = day_rows|sort(attribute='sort_order') %}
+        {% set head = namespace(row=slots[0]) %}
+        {% for s in slots %}
+          {% if s.heure == '00H00' %}{% set head.row = s %}{% endif %}
+        {% endfor %}
+        {% set n_oui = slots|selectattr('etat', 'equalto', 'OUI')|list|length %}
+        {% set n_non = slots|selectattr('etat', 'equalto', 'NON')|list|length %}
+        <details class="btc-regime-day">
+          <summary class="btc-regime-day__summary">
+            <span class="btc-regime-day__chev" aria-hidden="true"></span>
+            <span class="btc-regime-day__date">{{ day }}</span>
+            <span class="btc-regime-day__head">
+              <span class="btc-regime-day__head-label">00H00</span>
+              <span class="badge badge-{{ head.row.etat_color }}">{{ head.row.etat }}</span>
+            </span>
+            <span class="btc-regime-day__timeline" aria-label="Aperçu du jour">
+              {% for slot in slots %}
+              <span class="btc-regime-slot-dot btc-regime-slot-dot--{{ slot.etat_color }}" title="{{ slot.heure }} · {{ slot.etat }}"></span>
+              {% endfor %}
+            </span>
+            <span class="btc-regime-day__counts">{{ n_oui }} OUI · {{ n_non }} NON</span>
+          </summary>
+          <div class="table-wrap btc-regime-day__detail">
+            <table class="btc-regime-table btc-regime-table--detail">
+              <thead>
+                <tr>
+                  <th>Heure</th>
+                  <th>ÉTAT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for slot in slots %}
+                <tr class="btc-regime-row btc-regime-row--{{ slot.etat_color }}">
+                  <td>{{ slot.heure }}</td>
+                  <td><span class="badge badge-{{ slot.etat_color }}">{{ slot.etat }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+        {% endfor %}
+        {% else %}
+        <p class="empty btc-regime-days-empty">Tableau vide — lance une mise à jour.</p>
+        {% endif %}
       </div>
     </section>
   </div>
 
   <script>
     const btn = document.getElementById("btn-regime-update");
+    const daysWindowInput = document.getElementById("regime-days-window");
     const statusEl = document.getElementById("regime-status");
     const metaEl = document.getElementById("regime-meta");
-    const tbody = document.getElementById("regime-tbody");
-
-    function rowDate(r, sortOrder, fixedDays, totalRows) {
-      if (r.date && r.date !== "—") return r.date;
-      const order = sortOrder ?? 0;
-      if (fixedDays?.length && totalRows === fixedDays.length * 2) {
-        const dayIdx = Math.floor(order / 2);
-        if (dayIdx >= 0 && dayIdx < fixedDays.length) return fixedDays[dayIdx];
-      }
-      if (fixedDays?.length && totalRows === fixedDays.length && order < fixedDays.length) {
-        return fixedDays[order];
-      }
-      return "—";
-    }
+    const daysContainer = document.getElementById("regime-days");
 
     function logGeminiDiagnostic(data) {
       const raw = data.gemini_raw;
@@ -107,63 +128,101 @@
       if (data.parse_diag) {
         console.log("[Date ON/OFF] Diagnostic parsing:", data.parse_diag);
         const d = data.parse_diag;
-        if (d.prompt_issue || d.format_legacy_jours || (d.n_dot5 === 0 && d.n_points_json > 0)) {
+        if (d.prompt_issue) {
           console.warn(
-            "[Date ON/OFF] ⚠️ PROMPT — JSON sans points .5 (format legacy ou 1 entrée/jour).",
-            "Attendu:", d.n_points_expected, "points · Reçu:", d.n_points_json,
-            "· .5:", d.n_dot5, "· ~", d.entries_per_day, "entrée(s)/jour"
+            "[Date ON/OFF] ⚠️ PROMPT — créneaux manquants.",
+            "Attendu:", d.n_points_expected, "· Reçu:", d.n_points_json
+          );
+        } else if (d.lazy_all_same_etat || d.lazy_all_same_observation) {
+          console.warn(
+            "[Date ON/OFF] ⚠️ PARESSE Gemini —",
+            d.lazy_all_same_etat ? "même état partout" : "",
+            d.lazy_all_same_observation ? "même observation partout" : "",
+            "· Relancer ou vérifier le chart."
+          );
+        } else if (d.format_markdown_table) {
+          console.log(
+            "[Date ON/OFF] ✓ Tableau markdown parsé —", d.n_points_json, "créneau(x)"
           );
         } else {
           console.log(
-            "[Date ON/OFF] ✓ Format OK —", d.n_points_json, "points,",
-            d.n_dot5, "× .5, ~", d.entries_per_day, "entrée(s)/jour"
+            "[Date ON/OFF] ✓ JSON OK —", d.n_points_json, "créneau(x),",
+            "~", d.entries_per_day, "créneau(x)/jour"
           );
-        }
-      }
-      if (raw) {
-        try {
-          const cleaned = String(raw).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-          const payload = JSON.parse(cleaned);
-          const points = Array.isArray(payload)
-            ? payload
-            : (payload.jours || payload.points || []);
-          if (Array.isArray(points)) {
-            const byDay = {};
-            for (const p of points) {
-              const day = p.date || (p.index != null ? String(Math.trunc(Number(p.index))) : "?");
-              byDay[day] = (byDay[day] || 0) + 1;
-            }
-            console.log("[Date ON/OFF] Entrées par jour (JSON brut):", byDay);
-            const sample = points.find((p) => String(p.date || "").includes("12 juin") || Number(p.index) === 12);
-            if (sample) console.log("[Date ON/OFF] Exemple 12 juin dans le JSON:", sample);
-          }
-        } catch (_) {
-          console.log("[Date ON/OFF] JSON brut non parseable côté client (voir texte ci-dessus).");
         }
       }
     }
 
-    function renderRows(rows, fixedDays) {
-      if (!rows || !rows.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty">Aucun jour retourné.</td></tr>';
-        return;
-      }
-      const totalRows = rows.length;
+    function groupRowsByDay(rows) {
       const sorted = [...rows].sort(
         (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
       );
-      tbody.innerHTML = sorted.map((r) => {
-        const order = r.sort_order ?? 0;
-        return `
-        <tr class="btc-regime-row btc-regime-row--${r.etat_color}">
-          <td>${rowDate(r, order, fixedDays, totalRows)}</td>
-          <td>${r.zone ?? "—"}</td>
-          <td><span class="badge badge-${r.etat_color}">${r.etat}</span></td>
-          <td>${r.transition}</td>
-          <td>${r.note_display}</td>
-        </tr>
-      `;
-      }).join("");
+      const map = new Map();
+      for (const row of sorted) {
+        const day = row.date ?? "—";
+        if (!map.has(day)) map.set(day, []);
+        map.get(day).push(row);
+      }
+      return map;
+    }
+
+    function dayHeadSlot(slots) {
+      return slots.find((s) => s.heure === "00H00") ?? slots[0];
+    }
+
+    function countEtat(slots, etat) {
+      return slots.filter((s) => s.etat === etat).length;
+    }
+
+    function renderDayDetails(day, slots) {
+      const head = dayHeadSlot(slots);
+      const nOui = countEtat(slots, "OUI");
+      const nNon = countEtat(slots, "NON");
+      const timeline = slots.map(
+        (s) => `<span class="btc-regime-slot-dot btc-regime-slot-dot--${s.etat_color}" title="${s.heure} · ${s.etat}"></span>`
+      ).join("");
+      const detailRows = slots.map(
+        (s) => `
+          <tr class="btc-regime-row btc-regime-row--${s.etat_color}">
+            <td>${s.heure ?? "—"}</td>
+            <td><span class="badge badge-${s.etat_color}">${s.etat}</span></td>
+          </tr>`
+      ).join("");
+      return `
+        <details class="btc-regime-day">
+          <summary class="btc-regime-day__summary">
+            <span class="btc-regime-day__chev" aria-hidden="true"></span>
+            <span class="btc-regime-day__date">${day}</span>
+            <span class="btc-regime-day__head">
+              <span class="btc-regime-day__head-label">00H00</span>
+              <span class="badge badge-${head.etat_color}">${head.etat}</span>
+            </span>
+            <span class="btc-regime-day__timeline" aria-label="Aperçu du jour">${timeline}</span>
+            <span class="btc-regime-day__counts">${nOui} OUI · ${nNon} NON</span>
+          </summary>
+          <div class="table-wrap btc-regime-day__detail">
+            <table class="btc-regime-table btc-regime-table--detail">
+              <thead>
+                <tr>
+                  <th>Heure</th>
+                  <th>ÉTAT</th>
+                </tr>
+              </thead>
+              <tbody>${detailRows}</tbody>
+            </table>
+          </div>
+        </details>`;
+    }
+
+    function renderRows(rows) {
+      if (!rows || !rows.length) {
+        daysContainer.innerHTML = '<p class="empty btc-regime-days-empty">Aucun créneau retourné.</p>';
+        return;
+      }
+      const byDay = groupRowsByDay(rows);
+      daysContainer.innerHTML = [...byDay.entries()]
+        .map(([day, slots]) => renderDayDetails(day, slots))
+        .join("");
     }
 
     function updateChart(url) {
@@ -174,7 +233,7 @@
       if (!panel) return;
       panel.hidden = false;
       if (!link) {
-        panel.innerHTML = '<h2 class="btc-regime-chart__title">Chart source (Ten Kan · ligne cyan + bloc bleu + grille verticale)</h2>';
+        panel.innerHTML = '<h2 class="btc-regime-chart__title">Chart source (Ten Kan · nuages bleu/vert + colonnes verticales)</h2>';
         link = document.createElement("a");
         link.id = "regime-chart-link";
         link.target = "_blank";
@@ -190,17 +249,29 @@
       img.src = url + "?t=" + Date.now();
     }
 
+    function readDaysWindow() {
+      const raw = parseInt(daysWindowInput?.value ?? "5", 10);
+      const min = parseInt(daysWindowInput?.min ?? "5", 10);
+      const max = parseInt(daysWindowInput?.max ?? "30", 10);
+      if (!Number.isFinite(raw)) return 5;
+      return Math.min(max, Math.max(min, raw));
+    }
+
     btn.addEventListener("click", async () => {
       btn.disabled = true;
-      statusEl.textContent = "Capture Ten Kan + analyse Gemini en cours… (30–60 s)";
+      const daysWindow = readDaysWindow();
+      if (daysWindowInput) daysWindowInput.value = String(daysWindow);
+      statusEl.textContent = `Capture Ten Kan (${daysWindow}j × 6 créneaux) + analyse Gemini en cours… (30–60 s)`;
       try {
-        const res = await fetch("/btc-dates-onoff/run", { method: "POST" });
+        const res = await fetch("/btc-dates-onoff/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ days_window: daysWindow }),
+        });
         const data = await res.json();
         logGeminiDiagnostic(data);
         if (data.rows && data.rows.length) {
           console.log("[Date ON/OFF] Lignes API rendues:", data.rows.length);
-          const j12 = data.rows.filter((r) => r.date === "12 juin");
-          if (j12.length) console.log("[Date ON/OFF] Lignes 12 juin (tableau):", j12);
         }
         if (data.chart_url) {
           updateChart(data.chart_url);
@@ -209,10 +280,10 @@
           statusEl.textContent = "Erreur : " + (data.error || res.statusText);
           return;
         }
-        renderRows(data.rows, data.fixed_days);
+        renderRows(data.rows);
         const m = data.meta || {};
-        metaEl.innerHTML = `Dernière analyse : <strong>${m.created_at || "—"} UTC</strong> · ${m.n_rows || data.n_rows} ligne(s) · OUI : <strong>${data.n_oui ?? 0}</strong> · NON : <strong>${data.n_non ?? 0}</strong> · LIMITE : <strong>${data.n_limite ?? 0}</strong>`;
-        statusEl.textContent = "Tableau mis à jour (" + data.n_rows + " ligne(s)).";
+        metaEl.innerHTML = `Dernière analyse : <strong>${m.created_at || "—"} UTC</strong> · ${m.n_rows || data.n_rows} ligne(s) · fenêtre ${data.days_window ?? daysWindow}j · OUI : <strong>${data.n_oui ?? 0}</strong> · NON : <strong>${data.n_non ?? 0}</strong> · LIMITE : <strong>${data.n_limite ?? 0}</strong>`;
+        statusEl.textContent = `Tableau mis à jour (${data.n_inserted ?? data.n_upserted ?? 0} nouveau(x) créneau(x), ${data.n_rows} au total, days_window=${data.days_window ?? daysWindow}).`;
       } catch (err) {
         statusEl.textContent = "Erreur réseau : " + err.message;
       } finally {
