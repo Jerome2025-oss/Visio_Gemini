@@ -18,12 +18,13 @@
       <h2 class="backtest-tempo-panel__title">Filtre temporel</h2>
       <div class="backtest-tempo-dates">
         <label>Date début
-          <input type="date" id="bt-date-debut" value="{{ date_debut }}">
+          <input type="date" id="bt-date-debut" value="{{ date_debut }}" min="{{ project_min_date }}">
         </label>
         <label>Date fin
           <input type="date" id="bt-date-fin" value="{{ date_fin }}">
         </label>
         <div class="backtest-tempo-presets" role="group" aria-label="Raccourcis date">
+          <button type="button" class="backtest-tempo-preset" data-date-preset="all">Tout</button>
           <button type="button" class="backtest-tempo-preset" data-date-preset="today">Aujourd'hui</button>
           <button type="button" class="backtest-tempo-preset" data-date-preset="yesterday">Hier</button>
           <button type="button" class="backtest-tempo-preset" data-date-preset="7d">7 derniers jours</button>
@@ -78,6 +79,17 @@
             <span class="backtest-toggle__face">BTC H4 =10</span>
           </label>
         </div>
+        <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="BTC ON/OFF régime H4">
+          <span class="backtest-filtre-label">BTC ON/OFF</span>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="filtre-regime-oui"{% if regime_oui %} checked{% endif %}>
+            <span class="backtest-toggle__face">🟢 OUI</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="filtre-regime-non"{% if regime_non %} checked{% endif %}>
+            <span class="backtest-toggle__face">🔴 NON</span>
+          </label>
+        </div>
         <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="État BTC flash">
           <span class="backtest-filtre-label">Voyant BTC</span>
           <label class="backtest-toggle">
@@ -114,9 +126,10 @@
           <thead>
             <tr>
               <th>Token</th>
-              <th>Date flash</th>
+              <th>Date signal</th>
               <th>Score IA</th>
               <th>Voyant BTC</th>
+              <th>BTC ON/OFF</th>
               <th>BTC score</th>
               <th>Résultat</th>
               <th>Durée</th>
@@ -131,6 +144,7 @@
               <td>{{ f.flash_ts or '—' }}</td>
               <td>{% if f.score_display %}{{ f.score_display }}/10{% else %}—{% endif %}</td>
               <td>{{ f.btc_etat_voyant or '—' }}</td>
+              <td>{% if f.regime_onoff %}<span class="badge badge-{{ 'green' if f.regime_onoff == 'OUI' else 'red' if f.regime_onoff == 'NON' else 'yellow' }}">{{ f.regime_onoff }}</span>{% else %}—{% endif %}</td>
               <td>{% if f.btc_score is not none %}<span class="badge badge-{{ f.btc_badge }}">{{ f.btc_score }}/10</span>{% else %}—{% endif %}</td>
               <td class="bt-result"><span class="badge badge-muted">—</span></td>
               <td class="bt-duree">—</td>
@@ -138,7 +152,7 @@
               <td class="bt-tp-optimal">—</td>
             </tr>
             {% else %}
-            <tr><td colspan="9" class="empty">Aucun flash dans cette sélection temporelle.</td></tr>
+            <tr><td colspan="10" class="empty">Aucun signal dans cette sélection temporelle.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -165,6 +179,8 @@
   <script id="bt-flashes" type="application/json">{{ flashes | tojson }}</script>
   <script>
     let currentFiltres = {{ filtres | tojson }};
+    /** Début projet Visio Gemini — ne pas modifier sans accord. */
+    const PROJECT_MIN_DATE = {{ project_min_date | tojson }};
 
     const RESULT_BADGE = {
       TP:       { label: "🟢 TP",       cls: "green" },
@@ -180,10 +196,27 @@
       return d.toISOString().slice(0, 10);
     }
 
+    function clampDebutDate(iso) {
+      if (!iso || iso < PROJECT_MIN_DATE) return PROJECT_MIN_DATE;
+      return iso;
+    }
+
+    function applyDatePresetAll() {
+      document.getElementById("bt-date-debut").value = PROJECT_MIN_DATE;
+      document.getElementById("bt-date-fin").value = utcDateInputValue(0);
+      reloadWithFiltres();
+    }
+
     function getTemporalParams() {
+      const debutEl = document.getElementById("bt-date-debut");
+      let dateDebut = clampDebutDate(debutEl.value || PROJECT_MIN_DATE);
+      debutEl.value = dateDebut;
+      let dateFin = document.getElementById("bt-date-fin").value || utcDateInputValue(0);
+      if (dateFin < dateDebut) dateFin = dateDebut;
+      document.getElementById("bt-date-fin").value = dateFin;
       return {
-        date_debut: document.getElementById("bt-date-debut").value,
-        date_fin: document.getElementById("bt-date-fin").value,
+        date_debut: dateDebut,
+        date_fin: dateFin,
         heure_debut: document.getElementById("bt-heure-debut").value || "00:00",
         heure_fin: document.getElementById("bt-heure-fin").value || "23:59",
       };
@@ -234,11 +267,13 @@
         </div>`;
     }
 
-    function renderStats(stats) {
+    function renderStats(stats, rows) {
       const panel = document.getElementById("bt-stats-panel");
       const el = document.getElementById("bt-stats");
       panel.hidden = false;
       const pnlRealiseCls = pnlStatsClass(stats.pnl_realise);
+      const pnlEnCoursVal = resolvePnlEnCours(stats, rows);
+      const pnlEnCoursCls = pnlStatsClass(pnlEnCoursVal);
       const pnlTotalCls = pnlStatsClass(stats.pnl_total);
       const parEtat = stats.par_etat || {};
       const etatRows = ["OK", "REPRISE", "FAIBLE"].map((key) => {
@@ -250,36 +285,155 @@
             <span class="bt-stat-etat-row__label">${row.emoji} ${row.label}</span>
             <span class="bt-stat-etat-row__val">WR ${row.wr}</span>
             <span class="bt-stat-etat-row__val ${pnlCls}">PnL ${row.pnl}</span>
-            <span class="bt-stat-etat-row__val">${row.n} flash(s)</span>
+            <span class="bt-stat-etat-row__val">${row.n} trade${row.n > 1 ? "s" : ""}</span>
           </div>`;
       }).join("");
+      const trades = stats.trades != null ? stats.trades : stats.total;
+      const errPill = stats.err > 0
+        ? statPill("⚠️ ERR", String(stats.err))
+        : "";
+      const pnlEnCoursPill = stats.en_cours > 0
+        ? statPill("PnL en cours", pnlEnCoursVal || "—", pnlEnCoursCls)
+        : "";
       el.innerHTML = `
         <div class="backtest-stats">
           <div class="backtest-stats__group backtest-stats__group--counts">
+            ${statPill("📊 Trades", String(trades))}
             ${statPill("🟢 TP", `${stats.tp} <span class="bt-stat-pill__sub">(${stats.tp_pct})</span>`)}
             ${statPill("🔴 SL", `${stats.sl} <span class="bt-stat-pill__sub">(${stats.sl_pct})</span>`)}
             ${statPill("⏳ EN COURS", String(stats.en_cours))}
             ${statPill("🕐 CLÔ 24H", String(stats.clo_24h))}
+            ${errPill}
           </div>
           <div class="backtest-stats__sep" aria-hidden="true"></div>
           <div class="backtest-stats__group backtest-stats__group--pnl">
             ${statPill("PnL réalisé", stats.pnl_realise, pnlRealiseCls)}
+            ${pnlEnCoursPill}
             ${statPill("PnL total", stats.pnl_total, pnlTotalCls)}
           </div>
         </div>
+        <p id="bt-live-refresh-hint" class="funnel-card__meta backtest-live-hint" hidden></p>
         <div class="backtest-stats backtest-stats--etat">
           ${etatRows}
           <div class="bt-stat-etat-total">
             <span class="bt-stat-etat-row__label">TOTAL filtré</span>
             <span class="bt-stat-etat-row__val">WR ${stats.wr || "—"}</span>
             <span class="bt-stat-etat-row__val ${pnlTotalCls}">PnL ${stats.pnl_total}</span>
-            <span class="bt-stat-etat-row__val">${stats.total} flash(s)</span>
+            <span class="bt-stat-etat-row__val">${trades} trade${trades > 1 ? "s" : ""}</span>
           </div>
         </div>
       `;
     }
 
+    let liveRefreshTimer = null;
+    let lastResultats = [];
+    const LIVE_REFRESH_MS = 60000;
+
+    function parsePnlPct(val) {
+      if (!val || val === "—") return null;
+      const num = parseFloat(String(val).replace("~", "").replace("%", "").replace("+", "").trim());
+      return Number.isFinite(num) ? num : null;
+    }
+
+    function computePnlEnCoursFromRows(rows) {
+      let sum = 0;
+      let n = 0;
+      (rows || []).forEach((r) => {
+        if (r.resultat !== "EN_COURS") return;
+        const pnl = parsePnlPct(r.pnl_pct);
+        if (pnl == null) return;
+        sum += pnl;
+        n += 1;
+      });
+      if (n === 0) return null;
+      return "~" + (sum > 0 ? "+" : "") + sum.toFixed(2) + "%";
+    }
+
+    function resolvePnlEnCours(stats, rows) {
+      const fromStats = stats && stats.pnl_en_cours;
+      if (fromStats && fromStats !== "—") return fromStats;
+      if (stats && stats.pnl_en_cours_raw != null && Number.isFinite(Number(stats.pnl_en_cours_raw))) {
+        const n = Number(stats.pnl_en_cours_raw);
+        return "~" + (n > 0 ? "+" : "") + n.toFixed(2) + "%";
+      }
+      return computePnlEnCoursFromRows(rows);
+    }
+
+    function buildRunBody() {
+      return {
+        leverage: parseFloat(document.getElementById("bt-leverage").value),
+        tp: parseFloat(document.getElementById("bt-tp").value),
+        sl: parseFloat(document.getElementById("bt-sl").value),
+        filtres: getActiveFiltres(),
+        ...getActiveEtats(),
+        ...getTemporalParams(),
+      };
+    }
+
+    function setLiveRefreshHint(text, visible) {
+      const hint = document.getElementById("bt-live-refresh-hint");
+      if (!hint) return;
+      hint.hidden = !visible;
+      hint.textContent = text || "";
+    }
+
+    function scheduleLiveRefresh(stats) {
+      if (liveRefreshTimer) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+      }
+      if (!stats || stats.en_cours <= 0) {
+        setLiveRefreshHint("", false);
+        return;
+      }
+      setLiveRefreshHint(
+        "PnL en cours · mise à jour auto toutes les " + (LIVE_REFRESH_MS / 1000) + " s",
+        true
+      );
+      liveRefreshTimer = setInterval(() => runSimulation(true), LIVE_REFRESH_MS);
+    }
+
+    async function runSimulation(silent) {
+      const btn = document.getElementById("bt-run");
+      const spin = document.getElementById("bt-spinner");
+      if (!silent) {
+        btn.disabled = true;
+        spin.hidden = false;
+      } else {
+        setLiveRefreshHint("Actualisation PnL en cours…", true);
+      }
+      try {
+        const resp = await fetch("/backtest/tempo/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(buildRunBody()),
+        });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const data = await resp.json();
+        applyResults(data);
+        if (silent && data.stats && data.stats.en_cours > 0) {
+          setLiveRefreshHint(
+            "PnL en cours · MAJ " + new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) +
+            " · prochaine dans " + (LIVE_REFRESH_MS / 1000) + " s",
+            true
+          );
+        }
+      } catch (e) {
+        if (!silent) {
+          alert("Simulation échouée : " + e.message);
+        } else {
+          setLiveRefreshHint("MAJ auto échouée · retry dans " + (LIVE_REFRESH_MS / 1000) + " s", true);
+        }
+      } finally {
+        if (!silent) {
+          btn.disabled = false;
+          spin.hidden = true;
+        }
+      }
+    }
+
     function applyResults(data) {
+      lastResultats = data.resultats || [];
       const byKey = {};
       (data.resultats || []).forEach((r) => {
         byKey[r.token + "|" + r.flash_ts] = r;
@@ -297,7 +451,10 @@
           BacktestTable.applyOptimalTpCell(tr, row);
         }
       });
-      if (data.stats) renderStats(data.stats);
+      if (data.stats) {
+        renderStats(data.stats, lastResultats);
+        scheduleLiveRefresh(data.stats);
+      }
       if (data.period_summary) {
         document.getElementById("bt-period-summary").textContent = data.period_summary;
       }
@@ -325,6 +482,8 @@
         btc_ok: document.getElementById("filtre-btc-ok").checked,
         btc_reprise: document.getElementById("filtre-btc-reprise").checked,
         btc_faible: document.getElementById("filtre-btc-faible").checked,
+        regime_oui: document.getElementById("filtre-regime-oui").checked,
+        regime_non: document.getElementById("filtre-regime-non").checked,
       };
     }
 
@@ -339,6 +498,8 @@
       params.set("btc_ok", etats.btc_ok ? "true" : "false");
       params.set("btc_reprise", etats.btc_reprise ? "true" : "false");
       params.set("btc_faible", etats.btc_faible ? "true" : "false");
+      params.set("regime_oui", etats.regime_oui ? "true" : "false");
+      params.set("regime_non", etats.regime_non ? "true" : "false");
       appendTemporalParams(params);
       filtres.forEach((f) => params.append("filtres", f));
       window.location.href = "/backtest/tempo?" + params.toString();
@@ -368,6 +529,8 @@
     document.getElementById("filtre-btc-ok").addEventListener("change", reloadWithFiltres);
     document.getElementById("filtre-btc-reprise").addEventListener("change", reloadWithFiltres);
     document.getElementById("filtre-btc-faible").addEventListener("change", reloadWithFiltres);
+    document.getElementById("filtre-regime-oui").addEventListener("change", reloadWithFiltres);
+    document.getElementById("filtre-regime-non").addEventListener("change", reloadWithFiltres);
 
     document.querySelectorAll("[data-date-preset]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -385,6 +548,9 @@
         } else if (preset === "7d") {
           debut.value = utcDateInputValue(-6);
           fin.value = utcDateInputValue(0);
+        } else if (preset === "all") {
+          applyDatePresetAll();
+          return;
         }
       });
     });
@@ -407,6 +573,8 @@
       params.set("btc_ok", etats.btc_ok ? "true" : "false");
       params.set("btc_reprise", etats.btc_reprise ? "true" : "false");
       params.set("btc_faible", etats.btc_faible ? "true" : "false");
+      params.set("regime_oui", etats.regime_oui ? "true" : "false");
+      params.set("regime_non", etats.regime_non ? "true" : "false");
       appendTemporalParams(params);
       getActiveFiltres().forEach((f) => params.append("filtres", f));
       return "/backtest/tempo/export.csv?" + params.toString();
@@ -430,34 +598,10 @@
       triggerCsvExport();
     });
 
-    document.getElementById("bt-run").addEventListener("click", async () => {
-      const btn = document.getElementById("bt-run");
-      const spin = document.getElementById("bt-spinner");
-      btn.disabled = true;
-      spin.hidden = false;
-      try {
-        const temporal = getTemporalParams();
-        const resp = await fetch("/backtest/tempo/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({
-            leverage: parseFloat(document.getElementById("bt-leverage").value),
-            tp: parseFloat(document.getElementById("bt-tp").value),
-            sl: parseFloat(document.getElementById("bt-sl").value),
-            filtres: getActiveFiltres(),
-            ...getActiveEtats(),
-            ...temporal,
-          }),
-        });
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        const data = await resp.json();
-        applyResults(data);
-      } catch (e) {
-        alert("Simulation échouée : " + e.message);
-      } finally {
-        btn.disabled = false;
-        spin.hidden = true;
-      }
+    document.getElementById("bt-run").addEventListener("click", () => runSimulation(false));
+
+    window.addEventListener("beforeunload", () => {
+      if (liveRefreshTimer) clearInterval(liveRefreshTimer);
     });
   </script>
 </body>

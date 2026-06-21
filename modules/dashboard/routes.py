@@ -11,26 +11,37 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Form, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from modules.analyse.funnel import _decision_color, format_score_fr, run_funnel
-from modules.analyse.orchestrator import run_batch
-from modules.analyse.results import AnalysisResult
+from modules.analyse.funnel import _decision_color, format_score_fr
 from modules.config import load_app_config
+from modules.dashboard.backtest_battery import BatteryConfig, export_battery_files, run_battery
 from modules.dashboard.backtest_optimal_tp import build_optimal_tp_fields
 from modules.dashboard.backtest_temporal import (
+    BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE,
+    BACKTEST_TEMPO_DEFAULT_BTC_OK,
+    BACKTEST_TEMPO_DEFAULT_BTC_REPRISE,
+    BACKTEST_TEMPO_DEFAULT_LEVERAGE,
+    BACKTEST_TEMPO_DEFAULT_REGIME_NON,
+    BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
+    BACKTEST_TEMPO_DEFAULT_SL,
+    BACKTEST_TEMPO_DEFAULT_TP,
     TemporalFilter,
+    clamp_project_date_debut,
     filter_flashes_temporal,
     resolve_temporal_filter,
     temporal_interval_label,
     temporal_period_summary,
 )
+from modules.dashboard.btc_regime_filter import (
+    build_regime_lookup,
+    normalize_regime_etats,
+    passes_regime_filter,
+    regime_etat_for_flash,
+)
 from modules.dashboard.btc_price import get_market_spot
-from modules.dashboard.store import add_run, latest
-from modules.selection.bitunix_symbols import normalize_token_key
-from modules.selection.builders import build_manual_requests
 from modules.triggers import btc_context, db_manager
 from modules.triggers import btc_regime_dates
 
@@ -40,83 +51,6 @@ router = APIRouter()
 BITUNIX_API_URL = os.environ.get("BITUNIX_API_URL", "http://localhost:8002").rstrip("/")
 
 # Routes en ``def`` sync (pas ``async def``) : FastAPI les exécute dans un thread pool.
-# ``run_batch()`` appelle Playwright sync ; dans une coroutine asyncio cela lève
-# « Sync API inside the asyncio loop ». Ne pas convertir en async sans migrer la capture.
-
-
-_TIMEFRAME_ALIASES: dict[str, str] = {
-    "5mn": "5m",
-    "5m": "5m",
-    "15mn": "15m",
-    "15m": "15m",
-    "30mn": "30m",
-    "30m": "30m",
-    "1h": "1h",
-    "4h": "4h",
-    "1d": "1D",
-    "1j": "1D",
-    "1D": "1D",
-}
-
-_DASHBOARD_TF_ORDER: tuple[str, ...] = ("5m", "15m", "30m", "1h", "4h", "1D")
-
-_DASHBOARD_TF_LABELS: dict[str, str] = {
-    "5m": "5mn",
-    "15m": "15mn",
-    "30m": "30mn",
-    "1h": "1h",
-    "4h": "4h",
-    "1D": "1j",
-}
-
-
-def _normalize_timeframe(timeframe: str) -> str:
-    key = timeframe.strip().lower().replace(" ", "")
-    if key in _TIMEFRAME_ALIASES:
-        return _TIMEFRAME_ALIASES[key]
-    return timeframe.strip()
-
-
-def _dashboard_timeframe_options() -> list[dict[str, str]]:
-    """Options du select dashboard (libellés FR → clés config.yaml)."""
-    app_config = load_app_config()
-    options: list[dict[str, str]] = []
-    for key in _DASHBOARD_TF_ORDER:
-        if key not in app_config.timeframes:
-            continue
-        label = _DASHBOARD_TF_LABELS.get(key, key)
-        options.append({"key": key, "value": label, "label": label})
-    return options
-
-
-def _results_context(
-    request: Request,
-    *,
-    results: list[AnalysisResult] | None = None,
-    run_error: str | None = None,
-) -> dict:
-    app_config = load_app_config()
-    return {
-        "request": request,
-        "results": results if results is not None else latest(),
-        "run_error": run_error,
-        "captures_dir": app_config.paths.captures,
-        "agents_config": app_config.agents,
-    }
-
-
-def _render_results(
-    request: Request,
-    *,
-    results: list[AnalysisResult] | None = None,
-    run_error: str | None = None,
-) -> HTMLResponse:
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request,
-        "_results.html",
-        _results_context(request, results=results, run_error=run_error),
-    )
 
 
 @router.get("/api/market-spot")
@@ -128,96 +62,18 @@ def api_market_spot() -> JSONResponse:
 @router.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
     templates = request.app.state.templates
-    return templates.TemplateResponse(request, "index.html", {"request": request})
-
-
-@router.get("/manu", response_class=HTMLResponse)
-def manu_page(request: Request) -> HTMLResponse:
-    """Page analyse manuelle (agents + entonnoir Ichimoku)."""
-    templates = request.app.state.templates
-    app_config = load_app_config()
+    conn = db_manager.connect()
+    try:
+        funnel_listener = db_manager.get_funnel_listener_state(conn)
+    finally:
+        conn.close()
     return templates.TemplateResponse(
         request,
-        "manu.html",
+        "index.html",
         {
             "request": request,
-            "results": latest(),
-            "run_error": None,
-            "captures_dir": app_config.paths.captures,
-            "agents_config": app_config.agents,
-            "timeframes": _dashboard_timeframe_options(),
+            "funnel_listener": funnel_listener,
         },
-    )
-
-
-@router.get("/results", response_class=HTMLResponse)
-def results_fragment(request: Request) -> HTMLResponse:
-    return _render_results(request)
-
-
-@router.post("/run", response_class=HTMLResponse)
-def run_analysis(
-    request: Request,
-    symbol: Annotated[str, Form()],
-    timeframe: Annotated[str, Form()],
-    agents: Annotated[list[str] | None, Form()] = None,
-) -> HTMLResponse:
-    token = normalize_token_key(symbol)
-    tf = _normalize_timeframe(timeframe)
-    if not agents:
-        selected_agents: list[str] = []
-    elif isinstance(agents, str):
-        selected_agents = [agents]
-    else:
-        selected_agents = list(agents)
-
-    if not token:
-        return _render_results(request, results=[], run_error="Symbole requis.")
-    if not selected_agents:
-        return _render_results(
-            request,
-            results=[],
-            run_error="Sélectionnez au moins un agent.",
-        )
-
-    try:
-        requests = build_manual_requests(token, tf, agents=selected_agents)
-        results = run_batch(requests)
-        add_run(results)
-        return _render_results(request, results=results)
-    except Exception as exc:
-        return _render_results(request, results=[], run_error=str(exc))
-
-
-@router.post("/run_funnel", response_class=HTMLResponse)
-def run_funnel_route(
-    request: Request,
-    symbol: Annotated[str, Form()] = "",
-) -> HTMLResponse:
-    """Entonnoir Ichimoku 3TF (H4 → H1 → M15) — capture x3 + 1 appel vision.
-
-    Indépendant de ``/run`` : n'altère jamais le pipeline standard.
-    """
-    templates = request.app.state.templates
-    token = (symbol or "").strip()
-    if not token:
-        return templates.TemplateResponse(
-            request,
-            "_funnel_result.html",
-            {"request": request, "funnel": None, "funnel_error": "Symbole requis."},
-        )
-
-    try:
-        result = run_funnel(token)
-        funnel_error = result.error
-    except Exception as exc:  # garde-fou ultime — ne casse pas le dashboard
-        result = None
-        funnel_error = str(exc)
-
-    return templates.TemplateResponse(
-        request,
-        "_funnel_result.html",
-        {"request": request, "funnel": result, "funnel_error": funnel_error},
     )
 
 
@@ -489,6 +345,33 @@ def flash_simulate(
             request, sim_error=str(payload.get("error", "Simulation impossible."))
         )
     return _render_sim(request, sim=_sim_view(payload))
+
+
+class FunnelListenerPauseRequest(BaseModel):
+    paused: bool
+
+
+@router.get("/flash/listener/status")
+def flash_listener_status() -> JSONResponse:
+    """État pause/reprise entonnoir Ichimoku 3TF (listener Telegram)."""
+    conn = db_manager.connect()
+    try:
+        state = db_manager.get_funnel_listener_state(conn)
+    finally:
+        conn.close()
+    return JSONResponse(state)
+
+
+@router.post("/flash/listener/pause")
+def flash_listener_pause(body: FunnelListenerPauseRequest) -> JSONResponse:
+    """Met en pause ou reprend l'entonnoir Ichimoku 3TF."""
+    conn = db_manager.connect()
+    try:
+        db_manager.set_funnel_listener_paused(conn, body.paused)
+        state = db_manager.get_funnel_listener_state(conn)
+    finally:
+        conn.close()
+    return JSONResponse(state)
 
 
 @router.get("/flash/ping")
@@ -766,9 +649,11 @@ def _fetch_backtest_flashes(
     *,
     filtres: list[str] | None = None,
     etats: set[str] | None = None,
+    regime_etats: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Liste brute des flashs Ichimoku pour le backtest (sans simulation)."""
     btc_context.ensure_btc_columns(conn)
+    regime_lookup = build_regime_lookup(conn)
     active_etats = etats if etats is not None else _normalize_backtest_etats()
     rows = conn.execute(
         """
@@ -788,20 +673,24 @@ def _fetch_backtest_flashes(
     rows = [r for r in rows if _include_flash_in_backtest_list(r, active_etats)]
     flashes: list[dict[str, Any]] = []
     for row in rows:
+        flash_ts = row["signal_time_utc"]
+        if not passes_regime_filter(flash_ts, regime_lookup, regime_etats):
+            continue
         btc = btc_context.read_btc_fields_from_row(row)
         flash_btc = _read_btc_flash_fields(row)
         flashes.append(
             {
                 "id": int(row["id"]),
                 "token": str(row["token"]),
-                "flash_ts": row["signal_time_utc"],
-                "signal_time_utc": row["signal_time_utc"],
+                "flash_ts": flash_ts,
+                "signal_time_utc": flash_ts,
                 "analysis_time_utc": row["analysis_time_utc"],
                 "score": row["score_ia"],
                 "score_display": format_score_fr(row["score_ia"]),
                 "decision": row["decision_ia"],
                 "btc_score": btc.get("btc_context_score"),
                 "btc_badge": btc_context.btc_badge_color(btc.get("btc_context_score")),
+                "regime_onoff": regime_etat_for_flash(flash_ts, regime_lookup),
                 **flash_btc,
             }
         )
@@ -1052,6 +941,8 @@ def _backtest_row_from_sim(
         }
     code, provisional = _map_backtest_resultat(payload)
     pnl = payload.get("pnl_pct")
+    if pnl is None:
+        pnl = payload.get("pnl_pct_raw")
     pnl_float = float(pnl) if pnl is not None else None
     row: dict[str, Any] = {
         "token": flash["token"],
@@ -1100,25 +991,63 @@ def _win_rate_pct(tp: int, sl: int) -> str:
     return f"{round(tp / closed * 100)}%"
 
 
+SIM_TRADE_CODES = frozenset({"TP", "SL", "EN_COURS", "CLO_24H"})
+
+
+def is_simulated_trade(row: dict[str, Any]) -> bool:
+    """Trade simulé valide : TP, SL, clôture 24h ou position encore ouverte."""
+    return str(row.get("resultat") or "") in SIM_TRADE_CODES
+
+
+def count_simulated_trades(resultats: list[dict[str, Any]]) -> int:
+    return sum(1 for r in resultats if is_simulated_trade(r))
+
+
+def _row_pnl_float(row: dict[str, Any]) -> float | None:
+    """PnL numérique d'une ligne sim (y compris EN COURS provisoire)."""
+    if row.get("_pnl_all") is not None:
+        return float(row["_pnl_all"])
+    if row.get("_pnl_raw") is not None:
+        return float(row["_pnl_raw"])
+    if row.get("pnl_pct_raw") is not None:
+        return float(row["pnl_pct_raw"])
+    txt = str(row.get("pnl_pct") or "").strip()
+    if not txt or txt == "—":
+        return None
+    cleaned = txt.replace("~", "").replace("%", "").replace("+", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
 def _compute_backtest_stats(resultats: list[dict[str, Any]]) -> dict[str, Any]:
-    total = len(resultats)
     tp = sum(1 for r in resultats if r["resultat"] == "TP")
     sl = sum(1 for r in resultats if r["resultat"] == "SL")
     en_cours = sum(1 for r in resultats if r["resultat"] == "EN_COURS")
     clo = sum(1 for r in resultats if r["resultat"] == "CLO_24H")
+    err = sum(1 for r in resultats if r["resultat"] == "ERR")
+    trades = count_simulated_trades(resultats)
+    n_signaux = len(resultats)
 
     def _pct(n: int) -> str:
-        if total == 0:
+        if trades == 0:
             return "0%"
-        return f"{round(n / total * 100)}%"
+        return f"{round(n / trades * 100)}%"
 
-    pnls_realized = [r["_pnl_raw"] for r in resultats if r.get("_pnl_raw") is not None]
-    pnls_total = [r["_pnl_all"] for r in resultats if r.get("_pnl_all") is not None]
+    pnls_realized = [v for r in resultats if (v := _row_pnl_float(r)) is not None and r["resultat"] in ("TP", "SL", "CLO_24H")]
+    pnls_total = [v for r in resultats if (v := _row_pnl_float(r)) is not None]
     pnl_realise_sum = sum(pnls_realized) if pnls_realized else None
     pnl_total_sum = sum(pnls_total) if pnls_total else None
     has_en_cours_pnl = any(
-        r["resultat"] == "EN_COURS" and r.get("_pnl_all") is not None for r in resultats
+        r["resultat"] == "EN_COURS" and _row_pnl_float(r) is not None for r in resultats
     )
+    pnls_en_cours = [
+        v
+        for r in resultats
+        if r["resultat"] == "EN_COURS" and (v := _row_pnl_float(r)) is not None
+    ]
+    pnl_en_cours_sum = sum(pnls_en_cours) if pnls_en_cours else None
 
     par_etat: dict[str, dict[str, Any]] = {}
     for etat, emoji, label in (
@@ -1129,15 +1058,15 @@ def _compute_backtest_stats(resultats: list[dict[str, Any]]) -> dict[str, Any]:
         subset = [r for r in resultats if r.get("btc_etat") == etat]
         sub_tp = sum(1 for r in subset if r["resultat"] == "TP")
         sub_sl = sum(1 for r in subset if r["resultat"] == "SL")
-        sub_pnls = [r["_pnl_all"] for r in subset if r.get("_pnl_all") is not None]
+        sub_pnls = [v for r in subset if (v := _row_pnl_float(r)) is not None]
         sub_pnl_sum = sum(sub_pnls) if sub_pnls else None
         sub_has_live = any(
-            r["resultat"] == "EN_COURS" and r.get("_pnl_all") is not None for r in subset
+            r["resultat"] == "EN_COURS" and _row_pnl_float(r) is not None for r in subset
         )
         par_etat[etat] = {
             "emoji": emoji,
             "label": label,
-            "n": len(subset),
+            "n": sum(1 for r in subset if is_simulated_trade(r)),
             "wr": _win_rate_pct(sub_tp, sub_sl),
             "pnl": _format_pnl_pct(sub_pnl_sum, provisional=sub_has_live)
             if sub_pnl_sum is not None
@@ -1145,17 +1074,24 @@ def _compute_backtest_stats(resultats: list[dict[str, Any]]) -> dict[str, Any]:
         }
 
     return {
-        "total": total,
+        "trades": trades,
+        "total": trades,
+        "n_signaux": n_signaux,
         "tp": tp,
         "sl": sl,
         "tp_pct": _pct(tp),
         "sl_pct": _pct(sl),
         "en_cours": en_cours,
         "clo_24h": clo,
+        "err": err,
         "wr": _win_rate_pct(tp, sl),
         "pnl_realise": _format_pnl_pct(pnl_realise_sum)
         if pnl_realise_sum is not None
         else "—",
+        "pnl_en_cours": _format_pnl_pct(pnl_en_cours_sum, provisional=True)
+        if pnl_en_cours_sum is not None
+        else ("—" if en_cours == 0 else "~0.00%"),
+        "pnl_en_cours_raw": pnl_en_cours_sum,
         "pnl_total": _format_pnl_pct(
             pnl_total_sum,
             provisional=has_en_cours_pnl,
@@ -1167,116 +1103,15 @@ def _compute_backtest_stats(resultats: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 class BacktestRunRequest(BaseModel):
-    leverage: float = Field(default=30.0, ge=1.0, le=50.0)
-    tp: float = Field(default=1.4, ge=0.1, le=50.0)
-    sl: float = Field(default=2.0, ge=0.1, le=20.0)
+    leverage: float = Field(default=BACKTEST_TEMPO_DEFAULT_LEVERAGE, ge=1.0, le=50.0)
+    tp: float = Field(default=BACKTEST_TEMPO_DEFAULT_TP, ge=0.1, le=50.0)
+    sl: float = Field(default=BACKTEST_TEMPO_DEFAULT_SL, ge=0.1, le=20.0)
     filtres: list[str] = Field(default_factory=list)
-    btc_ok: bool = True
-    btc_reprise: bool = True
-    btc_faible: bool = True
-
-
-@router.get("/backtest", response_class=HTMLResponse)
-def backtest_page(
-    request: Request,
-    filtres: list[str] = Query(default=[]),
-    leverage: float = 30.0,
-    tp: float = 1.4,
-    sl: float = 2.0,
-    btc_ok: bool = Query(default=True),
-    btc_reprise: bool = Query(default=True),
-    btc_faible: bool = Query(default=True),
-) -> HTMLResponse:
-    """Page backtest historique — liste brute sans simulation au chargement."""
-    filtres_norm = _normalize_backtest_filtres(filtres)
-    etats = _normalize_backtest_etats(
-        btc_ok=btc_ok,
-        btc_reprise=btc_reprise,
-        btc_faible=btc_faible,
-    )
-    templates = request.app.state.templates
-    conn = db_manager.connect()
-    try:
-        flashes = _fetch_backtest_flashes(conn, filtres=filtres_norm, etats=etats)
-    finally:
-        conn.close()
-    return templates.TemplateResponse(
-        request,
-        "backtest.html",
-        {
-            "request": request,
-            "flashes": flashes,
-            "filtres": filtres_norm,
-            "leverage": leverage,
-            "tp": tp,
-            "sl": sl,
-            "btc_ok": btc_ok,
-            "btc_reprise": btc_reprise,
-            "btc_faible": btc_faible,
-        },
-    )
-
-
-@router.post("/backtest/run")
-def backtest_run(body: BacktestRunRequest) -> JSONResponse:
-    """Simule tous les flashs filtrés via bitunix simulate_one (batch)."""
-    filtres_norm = _normalize_backtest_filtres(body.filtres)
-    etats = _normalize_backtest_etats(
-        btc_ok=body.btc_ok,
-        btc_reprise=body.btc_reprise,
-        btc_faible=body.btc_faible,
-    )
-    raw_rows = _run_backtest_simulation(
-        filtres=filtres_norm,
-        etats=etats,
-        leverage=body.leverage,
-        tp=body.tp,
-        sl=body.sl,
-    )
-
-    stats = _compute_backtest_stats(raw_rows)
-    resultats = []
-    for r in raw_rows:
-        c = dict(r)
-        c.pop("_pnl_raw", None)
-        c.pop("_pnl_all", None)
-        resultats.append(c)
-
-    return JSONResponse({"resultats": resultats, "stats": stats})
-
-
-@router.get("/backtest/export.csv")
-def backtest_export_csv(
-    filtres: list[str] = Query(default=[]),
-    leverage: float = Query(30.0, ge=1, le=50),
-    tp: float = Query(1.4, ge=0.1, le=50),
-    sl: float = Query(2.0, ge=0.1, le=20),
-    btc_ok: bool = Query(default=True),
-    btc_reprise: bool = Query(default=True),
-    btc_faible: bool = Query(default=True),
-) -> Response:
-    """Export CSV backtest : simulation batch, colonnes du tableau uniquement."""
-    filtres_norm = _normalize_backtest_filtres(filtres)
-    etats = _normalize_backtest_etats(
-        btc_ok=btc_ok,
-        btc_reprise=btc_reprise,
-        btc_faible=btc_faible,
-    )
-    sim_rows = _run_backtest_simulation(
-        filtres=filtres_norm,
-        etats=etats,
-        leverage=leverage,
-        tp=tp,
-        sl=sl,
-    )
-    csv_rows = [_backtest_table_csv_row(r) for r in sim_rows]
-    content = _build_backtest_csv(csv_rows, fieldnames=_BACKTEST_TABLE_CSV_FIELDS)
-    filename = _backtest_csv_filename()
-    return Response(
-        content=content,
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    btc_ok: bool = BACKTEST_TEMPO_DEFAULT_BTC_OK
+    btc_reprise: bool = BACKTEST_TEMPO_DEFAULT_BTC_REPRISE
+    btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE
+    regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI
+    regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON
 
 
 @router.get("/backtest/chart")
@@ -1322,8 +1157,11 @@ def _fetch_backtest_flashes_temporal(
     filtres: list[str] | None,
     etats: set[str],
     temporal: TemporalFilter,
+    regime_etats: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
-    flashes = _fetch_backtest_flashes(conn, filtres=filtres, etats=etats)
+    flashes = _fetch_backtest_flashes(
+        conn, filtres=filtres, etats=etats, regime_etats=regime_etats
+    )
     return filter_flashes_temporal(flashes, temporal)
 
 
@@ -1335,11 +1173,16 @@ def _run_backtest_temporal_simulation(
     tp: float,
     sl: float,
     temporal: TemporalFilter,
+    regime_etats: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     conn = db_manager.connect()
     try:
         flashes = _fetch_backtest_flashes_temporal(
-            conn, filtres=filtres, etats=etats, temporal=temporal
+            conn,
+            filtres=filtres,
+            etats=etats,
+            temporal=temporal,
+            regime_etats=regime_etats,
         )
     finally:
         conn.close()
@@ -1391,26 +1234,31 @@ class BacktestTemporalRunRequest(BacktestRunRequest):
 def backtest_temporal_page(
     request: Request,
     filtres: list[str] = Query(default=[]),
-    leverage: float = 30.0,
-    tp: float = 1.4,
-    sl: float = 2.0,
+    leverage: float = BACKTEST_TEMPO_DEFAULT_LEVERAGE,
+    tp: float = BACKTEST_TEMPO_DEFAULT_TP,
+    sl: float = BACKTEST_TEMPO_DEFAULT_SL,
     date_debut: str | None = None,
     date_fin: str | None = None,
     heure_debut: str = "00:00",
     heure_fin: str = "23:59",
-    btc_ok: bool = Query(default=True),
-    btc_reprise: bool = Query(default=True),
-    btc_faible: bool = Query(default=True),
+    btc_ok: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_OK),
+    btc_reprise: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_REPRISE),
+    btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
+    regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
+    regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
 ) -> HTMLResponse:
     """Backtest temporel — même vue que l'historique + filtres date/heure."""
+    from modules.dashboard.backtest_temporal import VISIO_PROJECT_MIN_DATE_STR
+
     filtres_norm = _normalize_backtest_filtres(filtres)
     etats = _normalize_backtest_etats(
         btc_ok=btc_ok,
         btc_reprise=btc_reprise,
         btc_faible=btc_faible,
     )
+    regime_etats = normalize_regime_etats(regime_oui=regime_oui, regime_non=regime_non)
     temporal = resolve_temporal_filter(
-        date_debut=date_debut,
+        date_debut=clamp_project_date_debut(date_debut),
         date_fin=date_fin,
         heure_debut=heure_debut,
         heure_fin=heure_fin,
@@ -1419,7 +1267,11 @@ def backtest_temporal_page(
     conn = db_manager.connect()
     try:
         flashes = _fetch_backtest_flashes_temporal(
-            conn, filtres=filtres_norm, etats=etats, temporal=temporal
+            conn,
+            filtres=filtres_norm,
+            etats=etats,
+            temporal=temporal,
+            regime_etats=regime_etats,
         )
     finally:
         conn.close()
@@ -1436,11 +1288,14 @@ def backtest_temporal_page(
             "btc_ok": btc_ok,
             "btc_reprise": btc_reprise,
             "btc_faible": btc_faible,
+            "regime_oui": regime_oui,
+            "regime_non": regime_non,
             "date_debut": temporal.date_debut.isoformat(),
             "date_fin": temporal.date_fin.isoformat(),
             "heure_debut": temporal.heure_debut,
             "heure_fin": temporal.heure_fin,
-            "period_summary": temporal_period_summary(temporal, len(flashes)),
+            "project_min_date": VISIO_PROJECT_MIN_DATE_STR,
+            "period_summary": temporal_period_summary(temporal, len(flashes), label="signaux"),
             "interval_label": temporal_interval_label(temporal),
         },
     )
@@ -1455,8 +1310,12 @@ def backtest_temporal_run(body: BacktestTemporalRunRequest) -> JSONResponse:
         btc_reprise=body.btc_reprise,
         btc_faible=body.btc_faible,
     )
+    regime_etats = normalize_regime_etats(
+        regime_oui=body.regime_oui,
+        regime_non=body.regime_non,
+    )
     temporal = resolve_temporal_filter(
-        date_debut=body.date_debut,
+        date_debut=clamp_project_date_debut(body.date_debut),
         date_fin=body.date_fin,
         heure_debut=body.heure_debut,
         heure_fin=body.heure_fin,
@@ -1468,6 +1327,7 @@ def backtest_temporal_run(body: BacktestTemporalRunRequest) -> JSONResponse:
         tp=body.tp,
         sl=body.sl,
         temporal=temporal,
+        regime_etats=regime_etats,
     )
     stats = _compute_backtest_stats(raw_rows)
     resultats = []
@@ -1476,11 +1336,14 @@ def backtest_temporal_run(body: BacktestTemporalRunRequest) -> JSONResponse:
         c.pop("_pnl_raw", None)
         c.pop("_pnl_all", None)
         resultats.append(c)
+    period = temporal_period_summary(temporal, stats["trades"], label="trades")
+    if stats["n_signaux"] != stats["trades"]:
+        period += f" · {stats['n_signaux']} signaux simulés"
     return JSONResponse(
         {
             "resultats": resultats,
             "stats": stats,
-            "period_summary": temporal_period_summary(temporal, len(resultats)),
+            "period_summary": period,
             "interval_label": temporal_interval_label(temporal),
         }
     )
@@ -1489,16 +1352,18 @@ def backtest_temporal_run(body: BacktestTemporalRunRequest) -> JSONResponse:
 @router.get("/backtest/tempo/export.csv")
 def backtest_temporal_export_csv(
     filtres: list[str] = Query(default=[]),
-    leverage: float = Query(30.0, ge=1, le=50),
-    tp: float = Query(1.4, ge=0.1, le=50),
-    sl: float = Query(2.0, ge=0.1, le=20),
+    leverage: float = Query(BACKTEST_TEMPO_DEFAULT_LEVERAGE, ge=1, le=50),
+    tp: float = Query(BACKTEST_TEMPO_DEFAULT_TP, ge=0.1, le=50),
+    sl: float = Query(BACKTEST_TEMPO_DEFAULT_SL, ge=0.1, le=20),
     date_debut: str | None = None,
     date_fin: str | None = None,
     heure_debut: str = "00:00",
     heure_fin: str = "23:59",
-    btc_ok: bool = Query(default=True),
-    btc_reprise: bool = Query(default=True),
-    btc_faible: bool = Query(default=True),
+    btc_ok: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_OK),
+    btc_reprise: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_REPRISE),
+    btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
+    regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
+    regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
 ) -> Response:
     """Export CSV backtest temporel : simulation batch, colonnes du tableau uniquement."""
     filtres_norm = _normalize_backtest_filtres(filtres)
@@ -1507,8 +1372,9 @@ def backtest_temporal_export_csv(
         btc_reprise=btc_reprise,
         btc_faible=btc_faible,
     )
+    regime_etats = normalize_regime_etats(regime_oui=regime_oui, regime_non=regime_non)
     temporal = resolve_temporal_filter(
-        date_debut=date_debut,
+        date_debut=clamp_project_date_debut(date_debut),
         date_fin=date_fin,
         heure_debut=heure_debut,
         heure_fin=heure_fin,
@@ -1520,6 +1386,7 @@ def backtest_temporal_export_csv(
         tp=tp,
         sl=sl,
         temporal=temporal,
+        regime_etats=regime_etats,
     )
     csv_rows = [_backtest_table_csv_row(r) for r in sim_rows]
     content = _build_backtest_csv(csv_rows, fieldnames=_BACKTEST_TABLE_CSV_FIELDS)
@@ -1529,6 +1396,208 @@ def backtest_temporal_export_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+class BacktestBatteryRunRequest(BaseModel):
+    date_debut: str | None = None
+    date_fin: str | None = None
+    heure_debut: str = "00:00"
+    heure_fin: str = "23:59"
+    leverage: float = Field(default=30.0, ge=1.0, le=50.0)
+    tp: float = Field(default=1.4, ge=0.1, le=50.0)
+    sl: float = Field(default=2.0, ge=0.1, le=20.0)
+    export_files: bool = False
+
+
+@router.get("/backtest/battery", response_class=HTMLResponse)
+def backtest_battery_page(
+    request: Request,
+    date_debut: str | None = None,
+    date_fin: str | None = None,
+    heure_debut: str = "00:00",
+    heure_fin: str = "23:59",
+    leverage: float = 30.0,
+    tp: float = 1.4,
+    sl: float = 2.0,
+) -> HTMLResponse:
+    """Batterie de test — matrice BTC ON/OFF × voyants."""
+    temporal = resolve_temporal_filter(
+        date_debut=date_debut,
+        date_fin=date_fin,
+        heure_debut=heure_debut,
+        heure_fin=heure_fin,
+    )
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "backtest_battery.html",
+        {
+            "request": request,
+            "date_debut": temporal.date_debut.isoformat(),
+            "date_fin": temporal.date_fin.isoformat(),
+            "heure_debut": temporal.heure_debut,
+            "heure_fin": temporal.heure_fin,
+            "leverage": leverage,
+            "tp": tp,
+            "sl": sl,
+            "interval_label": temporal_interval_label(temporal),
+        },
+    )
+
+
+@router.post("/backtest/battery/run")
+def backtest_battery_run(body: BacktestBatteryRunRequest) -> JSONResponse:
+    """Lance la batterie (21 scénarios) — peut prendre plusieurs minutes."""
+    config = BatteryConfig(
+        date_debut=body.date_debut,
+        date_fin=body.date_fin,
+        heure_debut=body.heure_debut,
+        heure_fin=body.heure_fin,
+        leverage=body.leverage,
+        tp=body.tp,
+        sl=body.sl,
+    )
+    try:
+        payload = run_battery(config)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    if body.export_files:
+        paths = export_battery_files(
+            payload,
+            Path(__file__).resolve().parents[2] / "data" / "backtest_battery",
+        )
+        payload["export_paths"] = paths
+
+    return JSONResponse(payload)
+
+
+def _reports_bitunix_params(
+    *,
+    leverage: float,
+    tp: float,
+    sl: float,
+    date_from: str | None,
+    date_to: str | None,
+) -> dict[str, str | float]:
+    params: dict[str, str | float] = {
+        "leverage": leverage,
+        "tp": tp,
+        "sl": sl,
+    }
+    if date_from:
+        params["date_from"] = date_from
+    if date_to:
+        params["date_to"] = date_to
+    return params
+
+
+def _proxy_bitunix_json(
+    method: str,
+    path: str,
+    *,
+    params: dict[str, str | float],
+    timeout: float = 300.0,
+) -> JSONResponse:
+    url = f"{BITUNIX_API_URL}{path}"
+    try:
+        if method == "POST":
+            resp = httpx.post(url, params=params, timeout=timeout)
+        else:
+            resp = httpx.get(url, params=params, timeout=timeout)
+    except httpx.HTTPError as exc:
+        return JSONResponse(
+            {"ok": False, "error": f"API bitunix indisponible : {exc}"},
+            status_code=502,
+        )
+    try:
+        payload = resp.json()
+    except ValueError:
+        return JSONResponse(
+            {"ok": False, "error": "Réponse API bitunix invalide"},
+            status_code=502,
+        )
+    if resp.status_code >= 400:
+        detail = payload.get("detail") if isinstance(payload, dict) else None
+        err = detail or payload.get("error") if isinstance(payload, dict) else resp.text
+        return JSONResponse({"ok": False, "error": str(err)}, status_code=resp.status_code)
+    return JSONResponse(payload)
+
+
+@router.get("/reports/calendar", response_class=HTMLResponse)
+def reports_calendar_page(
+    request: Request,
+    leverage: float = BACKTEST_TEMPO_DEFAULT_LEVERAGE,
+    tp: float = BACKTEST_TEMPO_DEFAULT_TP,
+    sl: float = BACKTEST_TEMPO_DEFAULT_SL,
+    filtres: list[str] = Query(default=[]),
+    btc_ok: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_OK),
+    btc_reprise: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_REPRISE),
+    btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
+    regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
+    regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
+) -> HTMLResponse:
+    """Calendrier journalier PnL — flashs Visio Gemini."""
+    from modules.dashboard.reports_calendar import CALENDAR_MIN_DATE_STR
+
+    filtres_norm = _normalize_backtest_filtres(filtres)
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "reports_calendar.html",
+        {
+            "request": request,
+            "leverage": leverage,
+            "tp": tp,
+            "sl": sl,
+            "calendar_min_date": CALENDAR_MIN_DATE_STR,
+            "date_debut": CALENDAR_MIN_DATE_STR,
+            "date_fin": today_iso,
+            "filtres": filtres_norm,
+            "btc_ok": btc_ok,
+            "btc_reprise": btc_reprise,
+            "btc_faible": btc_faible,
+            "regime_oui": regime_oui,
+            "regime_non": regime_non,
+        },
+    )
+
+
+@router.get("/reports/calendar/data")
+def reports_calendar_data(
+    leverage: float = Query(BACKTEST_TEMPO_DEFAULT_LEVERAGE, ge=1, le=50),
+    tp: float = Query(BACKTEST_TEMPO_DEFAULT_TP, ge=0.1, le=50),
+    sl: float = Query(BACKTEST_TEMPO_DEFAULT_SL, ge=0.1, le=20),
+    date_from: str | None = None,
+    date_to: str | None = None,
+    filtres: list[str] = Query(default=[]),
+    btc_ok: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_OK),
+    btc_reprise: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_REPRISE),
+    btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
+    regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
+    regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
+) -> JSONResponse:
+    """Calendrier PnL local (flashs Visio Gemini depuis le 14/06/2026)."""
+    from modules.dashboard.reports_calendar import build_calendar_data
+
+    try:
+        payload = build_calendar_data(
+            leverage=leverage,
+            tp=tp,
+            sl=sl,
+            date_from=date_from,
+            date_to=date_to,
+            filtres=filtres,
+            btc_ok=btc_ok,
+            btc_reprise=btc_reprise,
+            btc_faible=btc_faible,
+            regime_oui=regime_oui,
+            regime_non=regime_non,
+        )
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse(payload)
 
 
 def register_png_url_filter(templates, captures_dir: Path) -> None:

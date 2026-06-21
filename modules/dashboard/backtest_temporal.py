@@ -6,6 +6,28 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+# Début historique Visio Gemini (figé).
+VISIO_PROJECT_MIN_DATE = date(2026, 6, 14)
+VISIO_PROJECT_MIN_DATE_STR = VISIO_PROJECT_MIN_DATE.isoformat()
+
+# Réglages par défaut page Backtest TEMPO (figés).
+BACKTEST_TEMPO_DEFAULT_LEVERAGE = 30.0
+BACKTEST_TEMPO_DEFAULT_TP = 1.4
+BACKTEST_TEMPO_DEFAULT_SL = 2.0
+BACKTEST_TEMPO_DEFAULT_BTC_OK = True
+BACKTEST_TEMPO_DEFAULT_BTC_REPRISE = False
+BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE = False
+BACKTEST_TEMPO_DEFAULT_REGIME_OUI = True
+BACKTEST_TEMPO_DEFAULT_REGIME_NON = False
+
+
+def clamp_project_date_debut(value: str | None) -> str | None:
+    """Date début ≥ 14/06/2026 (début projet)."""
+    if not value or not str(value).strip():
+        return None
+    raw = str(value).strip()[:10]
+    return raw if raw >= VISIO_PROJECT_MIN_DATE_STR else VISIO_PROJECT_MIN_DATE_STR
+
 
 @dataclass(frozen=True)
 class TemporalFilter:
@@ -77,14 +99,18 @@ def resolve_temporal_filter(
     h1 = _normalize_time_param(heure_fin, default="23:59")
 
     if d0 is None and d1 is None:
-        d0 = today - timedelta(days=6)
+        d0 = VISIO_PROJECT_MIN_DATE
         d1 = today
     elif d0 is not None and d1 is None:
+        if d0 < VISIO_PROJECT_MIN_DATE:
+            d0 = VISIO_PROJECT_MIN_DATE
         d1 = d0
     elif d0 is None and d1 is not None:
-        d0 = d1
+        d0 = d1 if d1 >= VISIO_PROJECT_MIN_DATE else VISIO_PROJECT_MIN_DATE
     else:
         assert d0 is not None and d1 is not None
+        if d0 < VISIO_PROJECT_MIN_DATE:
+            d0 = VISIO_PROJECT_MIN_DATE
         if d1 < d0:
             d0, d1 = d1, d0
 
@@ -145,5 +171,10 @@ def temporal_interval_label(temporal: TemporalFilter) -> str:
     )
 
 
-def temporal_period_summary(temporal: TemporalFilter, count: int) -> str:
-    return f"{count} flash(s) · {temporal_interval_label(temporal)}"
+def temporal_period_summary(
+    temporal: TemporalFilter,
+    count: int,
+    *,
+    label: str = "signaux",
+) -> str:
+    return f"{count} {label} · {temporal_interval_label(temporal)}"

@@ -18,6 +18,26 @@
       <div class="results-head">
         <h2>⚡ Analyses automatiques (FLASH)</h2>
         <div class="flash-controls">
+          <div class="funnel-listener-control" id="funnel-listener-control">
+            <span
+              class="funnel-listener-status{% if funnel_listener.paused %} funnel-listener-status--paused{% else %} funnel-listener-status--active{% endif %}"
+              id="funnel-listener-status"
+            >
+              {% if funnel_listener.paused %}
+              ⏸ Entonnoir Ichimoku 3TF — en pause
+              {% else %}
+              ▶ Entonnoir Ichimoku 3TF — actif
+              {% endif %}
+            </span>
+            <button
+              type="button"
+              id="funnel-listener-btn"
+              class="funnel-listener-btn{% if funnel_listener.paused %} funnel-listener-btn--resume{% else %} funnel-listener-btn--pause{% endif %}"
+              data-paused="{{ '1' if funnel_listener.paused else '0' }}"
+            >
+              {% if funnel_listener.paused %}▶ Reprendre{% else %}⏸ Pause{% endif %}
+            </button>
+          </div>
           <div class="flash-toggle" role="group" aria-label="Filtre des flashs">
             <button
               type="button"
@@ -49,6 +69,39 @@
   </div>
 
   <script>
+    (function () {
+      var statusEl = document.getElementById("funnel-listener-status");
+      var btn = document.getElementById("funnel-listener-btn");
+      if (!statusEl || !btn) return;
+
+      function applyListenerState(state) {
+        var paused = !!state.paused;
+        btn.dataset.paused = paused ? "1" : "0";
+        btn.textContent = paused ? "▶ Reprendre" : "⏸ Pause";
+        btn.classList.toggle("funnel-listener-btn--pause", !paused);
+        btn.classList.toggle("funnel-listener-btn--resume", paused);
+        statusEl.classList.toggle("funnel-listener-status--paused", paused);
+        statusEl.classList.toggle("funnel-listener-status--active", !paused);
+        statusEl.textContent = paused
+          ? "⏸ Entonnoir Ichimoku 3TF — en pause"
+          : "▶ Entonnoir Ichimoku 3TF — actif";
+      }
+
+      btn.addEventListener("click", function () {
+        var paused = btn.dataset.paused === "1";
+        btn.disabled = true;
+        fetch("/flash/listener/pause", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paused: !paused }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(applyListenerState)
+          .catch(function () {})
+          .finally(function () { btn.disabled = false; });
+      });
+    })();
+
     // Mémorisation des réglages TP/SL/levier par carte FLASH (localStorage).
     (function () {
       var FIELDS = ["leverage", "tp", "sl"];

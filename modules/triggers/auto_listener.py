@@ -173,6 +173,12 @@ async def process_signal(text: str) -> None:
 
     conn = db_manager.connect()
     try:
+        if db_manager.is_funnel_listener_paused(conn):
+            logger.info(
+                "⏸ Entonnoir en pause — %s retiré de la file sans analyse.",
+                token,
+            )
+            return
         if db_manager.recently_analyzed(conn, token, within_minutes=DEDUPE_MINUTES):
             logger.info(
                 "⏭ %s déjà analysé il y a < %s min — entonnoir ignoré (anti-doublon).",
@@ -231,6 +237,17 @@ async def enqueue_flash_signal(text: str) -> None:
     if not token:
         logger.warning("⚠ Signal FLASH détecté mais token introuvable — ignoré.")
         return
+
+    conn = db_manager.connect()
+    try:
+        if db_manager.is_funnel_listener_paused(conn):
+            logger.info(
+                "⏸ Entonnoir en pause — FLASH %s ignoré (reprise via dashboard).",
+                token,
+            )
+            return
+    finally:
+        conn.close()
 
     signal_time = extract_signal_time(text)
     if token in _queued_or_running:

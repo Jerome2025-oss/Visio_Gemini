@@ -108,6 +108,15 @@ CREATE TABLE IF NOT EXISTS btc_regime_state (
 );
 """
 
+_FUNNEL_LISTENER_STATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS funnel_listener_state (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    paused      INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT
+);
+INSERT OR IGNORE INTO funnel_listener_state (id, paused) VALUES (1, 0);
+"""
+
 _BTC_REGIME_MIGRATE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("etat", "TEXT"),
     ("transition", "TEXT"),
@@ -320,6 +329,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_BTC_REGIME_DATES_SCHEMA)
     conn.executescript(_BTC_REGIME_DATES_INDEX)
     conn.executescript(_BTC_REGIME_STATE_SCHEMA)
+    conn.executescript(_FUNNEL_LISTENER_STATE_SCHEMA)
     conn.commit()
     _migrate(conn)
 
@@ -723,6 +733,43 @@ def save_btc_regime_state(
         (chart_path, now, last_error),
     )
     conn.commit()
+
+
+def get_funnel_listener_state(conn: sqlite3.Connection) -> dict[str, str | bool | None]:
+    """État pause/reprise de l'entonnoir Ichimoku (listener Telegram)."""
+    row = conn.execute(
+        "SELECT paused, updated_at FROM funnel_listener_state WHERE id = 1"
+    ).fetchone()
+    if not row:
+        return {"paused": False, "updated_at": None}
+    return {
+        "paused": bool(row["paused"]),
+        "updated_at": row["updated_at"],
+    }
+
+
+def is_funnel_listener_paused(conn: sqlite3.Connection) -> bool:
+    return bool(get_funnel_listener_state(conn)["paused"])
+
+
+def set_funnel_listener_paused(conn: sqlite3.Connection, paused: bool) -> None:
+    """Pause ou reprend l'entonnoir Ichimoku 3TF (lu par auto_listener)."""
+    now = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        """
+        INSERT INTO funnel_listener_state (id, paused, updated_at)
+        VALUES (1, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            paused = excluded.paused,
+            updated_at = excluded.updated_at
+        """,
+        (1 if paused else 0, now),
+    )
+    conn.commit()
+    logger.info(
+        "🎚 Entonnoir Ichimoku 3TF %s (dashboard)",
+        "en pause" if paused else "repris",
+    )
 
 
 def prune_future_btc_regime_slots(

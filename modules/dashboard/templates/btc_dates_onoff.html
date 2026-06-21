@@ -20,6 +20,17 @@
           <span><i class="dot dot-red"></i> NON = vert et bleu visibles (deux nuages)</span>
           <span><i class="dot dot-yellow"></i> LIMITE = cas ambigu</span>
         </div>
+        <div class="backtest-filtre backtest-filtre--etat btc-regime-display-filter" role="group" aria-label="Filtre affichage OUI/NON">
+          <span class="backtest-filtre-label">Afficher</span>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="regime-show-oui" checked>
+            <span class="backtest-toggle__face">OUI</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="regime-show-non" checked>
+            <span class="backtest-toggle__face">NON</span>
+          </label>
+        </div>
         <label class="btc-regime-days-field" for="regime-days-window">
           Jours visibles
           <input
@@ -115,12 +126,16 @@
     </section>
   </div>
 
+  <script id="regime-rows-json" type="application/json">{{ rows | tojson }}</script>
   <script>
     const btn = document.getElementById("btn-regime-update");
     const daysWindowInput = document.getElementById("regime-days-window");
     const statusEl = document.getElementById("regime-status");
     const metaEl = document.getElementById("regime-meta");
     const daysContainer = document.getElementById("regime-days");
+    const showOuiEl = document.getElementById("regime-show-oui");
+    const showNonEl = document.getElementById("regime-show-non");
+    let allRows = [];
 
     function logGeminiDiagnostic(data) {
       const raw = data.gemini_raw;
@@ -214,16 +229,51 @@
         </details>`;
     }
 
+    function passesDisplayFilter(row) {
+      const etat = row.etat;
+      if (etat === "OUI") return showOuiEl?.checked !== false;
+      if (etat === "NON") return showNonEl?.checked !== false;
+      return true;
+    }
+
+    function filterRowsForDisplay(rows) {
+      if (!rows?.length) return [];
+      const showOui = showOuiEl?.checked !== false;
+      const showNon = showNonEl?.checked !== false;
+      if (showOui && showNon) return rows;
+      return rows.filter(passesDisplayFilter);
+    }
+
     function renderRows(rows) {
-      if (!rows || !rows.length) {
-        daysContainer.innerHTML = '<p class="empty btc-regime-days-empty">Aucun créneau retourné.</p>';
+      allRows = rows || [];
+      const visible = filterRowsForDisplay(allRows);
+      if (!visible.length) {
+        daysContainer.innerHTML = '<p class="empty btc-regime-days-empty">Aucun créneau correspondant au filtre OUI/NON.</p>';
         return;
       }
-      const byDay = groupRowsByDay(rows);
+      const byDay = groupRowsByDay(visible);
       daysContainer.innerHTML = [...byDay.entries()]
         .map(([day, slots]) => renderDayDetails(day, slots))
         .join("");
     }
+
+    function onDisplayFilterChange() {
+      renderRows(allRows);
+    }
+
+    showOuiEl?.addEventListener("change", onDisplayFilterChange);
+    showNonEl?.addEventListener("change", onDisplayFilterChange);
+
+    (function initRegimeRows() {
+      const el = document.getElementById("regime-rows-json");
+      if (!el) return;
+      try {
+        const parsed = JSON.parse(el.textContent || "[]");
+        if (Array.isArray(parsed) && parsed.length) {
+          allRows = parsed;
+        }
+      } catch (_) { /* ignore */ }
+    })();
 
     function updateChart(url) {
       if (!url) return;

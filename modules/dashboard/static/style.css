@@ -388,8 +388,64 @@ th {
 /* ── Toggle Tous / Ichimoku (liste FLASH) ──────────────────────────── */
 .flash-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
+}
+
+.funnel-listener-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem 0.25rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.funnel-listener-status {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.funnel-listener-status--active {
+  color: #86efac;
+}
+
+.funnel-listener-status--paused {
+  color: #fca5a5;
+}
+
+.funnel-listener-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.funnel-listener-btn--pause {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.funnel-listener-btn--pause:hover {
+  background: rgba(239, 68, 68, 0.28);
+}
+
+.funnel-listener-btn--resume {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+}
+
+.funnel-listener-btn--resume:hover {
+  background: rgba(34, 197, 94, 0.32);
+}
+
+.funnel-listener-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .flash-toggle {
@@ -791,6 +847,12 @@ th {
 .backtest-stats-panel {
   margin-bottom: 1rem;
   padding: 0.85rem 1rem;
+}
+
+.backtest-live-hint {
+  margin: 0.65rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 .backtest-stats {
@@ -1450,4 +1512,100 @@ th {
     margin-left: 0;
     width: 100%;
   }
+}
+
+/* ── Batterie backtest ─────────────────────────────────────────────── */
+.battery-form {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
+}
+
+.battery-export-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.battery-hint {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+}
+
+.battery-table td.pnl-up,
+.battery-table td.pnl-down,
+.battery-table td.pnl-neutral {
+  font-weight: 600;
+}
+
+.battery-row--oui {
+  background: rgba(34, 197, 94, 0.06);
+}
+
+.battery-row--non {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.battery-missed-block {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+
+.battery-missed-block summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.battery-non-empty {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+.battery-tp-rates-meta {
+  margin-bottom: 0.75rem;
+}
+
+.battery-tp-rates-total td {
+  border-top: 2px solid var(--border);
+  padding-top: 0.65rem;
+}
+
+.battery-section-hint {
+  margin: -0.25rem 0 0.75rem;
+  font-size: 0.82rem;
+}
+
+.battery-synthese {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-width: 36rem;
+}
+
+.battery-synthese__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  font-size: 0.92rem;
+}
+
+.battery-synthese__row--net {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  margin-top: 0.25rem;
+}
+
+.battery-synthese__verdict {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
 }

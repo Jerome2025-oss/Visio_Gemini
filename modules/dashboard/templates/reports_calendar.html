@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visio Gemini — Calendrier</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/reports_calendar.css">
+</head>
+<body data-calendar-min="{{ calendar_min_date }}">
+  <div class="wrap rp-cal-page">
+    {% set page_title = "Calendrier journalier" %}
+    {% set page_subtitle = "PnL par jour · trades simulés (TP/SL/clôture 24h/en cours) · filtres alignés backtest TEMPO" %}
+    {% set nav_active = "reports-calendar" %}
+    {% include "_dash_nav.html" %}
+
+    <section class="panel">
+      <div class="rp-filters">
+        <div class="rp-field">
+          <label for="rp-lev">Levier</label>
+          <input type="number" id="rp-lev" min="1" max="50" step="1" value="{{ leverage }}">
+        </div>
+        <div class="rp-field">
+          <label for="rp-tp">TP %</label>
+          <input type="number" id="rp-tp" min="0.1" max="50" step="0.1" value="{{ '%.1f'|format(tp) }}">
+        </div>
+        <div class="rp-field">
+          <label for="rp-sl">SL %</label>
+          <input type="number" id="rp-sl" min="0.1" max="20" step="0.1" value="{{ '%.1f'|format(sl) }}">
+        </div>
+        <div class="rp-field">
+          <label for="rp-from">Date début</label>
+          <input type="date" id="rp-from" min="{{ calendar_min_date }}" value="{{ date_debut }}">
+        </div>
+        <div class="rp-field">
+          <label for="rp-to">Date fin</label>
+          <input type="date" id="rp-to" value="{{ date_fin }}">
+        </div>
+        <div class="rp-field rp-field--presets">
+          <label>Raccourcis</label>
+          <div class="rp-presets" role="group" aria-label="Raccourcis période">
+            <button type="button" class="rp-preset" data-preset="all">Tout</button>
+            <button type="button" class="rp-preset" data-preset="7">7 jours</button>
+            <button type="button" class="rp-preset" data-preset="30">30 jours</button>
+            <button type="button" class="rp-preset" data-preset="90">90 jours</button>
+          </div>
+        </div>
+        <div class="rp-actions">
+          <button type="button" id="rp-apply" class="rp-btn">🔄 Appliquer</button>
+        </div>
+        <span id="rp-status" class="rp-status">Clique « Appliquer » pour charger le calendrier.</span>
+      </div>
+      <div class="rp-filters rp-filters--toggles">
+        <div class="backtest-filtre" role="group" aria-label="Filtres">
+          <span class="backtest-filtre-label">Filtres</span>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-tous"{% if not filtres %} checked{% endif %}>
+            <span class="backtest-toggle__face">Tous</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-ichimoku"{% if 'ichimoku' in filtres %} checked{% endif %}>
+            <span class="backtest-toggle__face">Ichimoku</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-btc"{% if 'btc' in filtres %} checked{% endif %}>
+            <span class="backtest-toggle__face">BTC H4 ≥5</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-btc10"{% if 'btc10' in filtres %} checked{% endif %}>
+            <span class="backtest-toggle__face">BTC H4 =10</span>
+          </label>
+        </div>
+        <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="BTC ON/OFF régime H4">
+          <span class="backtest-filtre-label">BTC ON/OFF</span>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-regime-oui"{% if regime_oui %} checked{% endif %}>
+            <span class="backtest-toggle__face">🟢 OUI</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-regime-non"{% if regime_non %} checked{% endif %}>
+            <span class="backtest-toggle__face">🔴 NON</span>
+          </label>
+        </div>
+        <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="État BTC flash">
+          <span class="backtest-filtre-label">Voyant BTC</span>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-btc-ok"{% if btc_ok %} checked{% endif %}>
+            <span class="backtest-toggle__face">🟢 BTC OK</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-btc-reprise"{% if btc_reprise %} checked{% endif %}>
+            <span class="backtest-toggle__face">✅ BTC EN REPRISE</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-btc-faible"{% if btc_faible %} checked{% endif %}>
+            <span class="backtest-toggle__face">🔴 BTC FAIBLE</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 style="margin-top:0">🗓️ Calendrier journalier</h2>
+      <div id="rp-calendar-stats" class="rp-stats" hidden></div>
+      <div id="rp-calendar-kpis" class="rp-kpis"></div>
+      <div id="rp-calendar" class="rp-calendar">
+        <p class="rp-empty">Sélectionnez les réglages puis cliquez « Appliquer ».</p>
+      </div>
+      <div class="rp-legend">
+        <span class="rp-legend-item"><span class="rp-swatch rp-swatch--pos"></span> Jour positif</span>
+        <span class="rp-legend-item"><span class="rp-swatch rp-swatch--neg"></span> Jour négatif</span>
+        <span class="rp-legend-item"><span class="rp-swatch" style="background:rgba(139,148,158,0.18)"></span> Aucun trade</span>
+        <span class="rp-legend-item rp-legend-hint">Cliquez sur un jour tradé pour voir le détail.</span>
+      </div>
+    </section>
+  </div>
+
+  <div id="rp-cal-modal" class="rp-modal" hidden>
+    <div class="rp-modal-backdrop" data-rp-close></div>
+    <div class="rp-modal-panel" role="dialog" aria-labelledby="rp-cal-modal-title">
+      <header class="rp-modal-header">
+        <h3 id="rp-cal-modal-title">Détail du jour</h3>
+        <button type="button" class="rp-modal-close" data-rp-close aria-label="Fermer">✕</button>
+      </header>
+      <div id="rp-cal-modal-summary" class="rp-modal-summary"></div>
+      <div class="rp-modal-body">
+        <div id="rp-cal-modal-trades" class="rp-day-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/reports_calendar.js" defer></script>
+</body>
+</html>

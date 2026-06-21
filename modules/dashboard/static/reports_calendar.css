@@ -1,0 +1,475 @@
+/* Calendrier reports — styles alignés Visio Gemini */
+.rp-cal-page {
+  --line: var(--border);
+  --ok: var(--green);
+  --card: var(--surface);
+}
+
+.rp-cal-page.wrap {
+  max-width: 1280px;
+}
+
+.rp-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.rp-filters--toggles {
+  align-items: flex-start;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.rp-stats {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(15, 20, 27, 0.55);
+}
+
+.rp-stats .backtest-stats {
+  gap: 18px;
+}
+
+.rp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rp-field label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.rp-field select,
+.rp-field input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-manual {
+  display: flex;
+  gap: 8px;
+}
+
+.rp-manual input {
+  width: 76px;
+}
+
+.rp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rp-preset {
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: rgba(15, 20, 27, 0.75);
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.rp-preset:hover {
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.rp-field--presets {
+  min-width: 180px;
+}
+
+.rp-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.rp-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.16);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rp-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.28);
+}
+
+.rp-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rp-status {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.rp-pos {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.rp-neg {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.rp-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 30px;
+}
+
+.rp-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.rp-kpi {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: rgba(15, 20, 27, 0.6);
+}
+
+.rp-kpi .label {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.rp-kpi .value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.rp-kpi--day .value {
+  font-size: 1.15rem;
+}
+
+.rp-kpi-date {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.rp-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.rp-cal-month-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+
+.rp-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rp-cal-dow {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  padding: 6px 4px 8px;
+  text-transform: uppercase;
+}
+
+.rp-cal-cell {
+  min-height: 88px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px 8px;
+  font-size: 0.9rem;
+  transition: transform 0.1s ease, box-shadow 0.12s ease;
+}
+
+.rp-cal-cell--empty {
+  min-height: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.rp-cal-cell--none {
+  background: rgba(139, 148, 158, 0.08);
+  color: var(--muted);
+  justify-content: center;
+  align-items: center;
+}
+
+.rp-cal-cell--zero {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(234, 179, 8, 0.45);
+}
+
+.rp-cal-zero-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--yellow);
+}
+
+.rp-cal-cell--pending {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.35);
+  color: var(--muted);
+}
+
+.rp-cal-pending-label {
+  font-size: 0.72rem;
+  color: var(--accent);
+  font-style: italic;
+}
+
+.rp-cal-cell--active {
+  cursor: pointer;
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+button.rp-cal-cell {
+  appearance: none;
+}
+
+button.rp-cal-cell.rp-cal-cell--pos {
+  background: rgba(34, 197, 94, 0.342);
+  border-color: rgba(34, 197, 94, 0.42);
+}
+
+button.rp-cal-cell.rp-cal-cell--neg {
+  background: rgba(239, 68, 68, 0.374);
+  border-color: rgba(239, 68, 68, 0.44);
+}
+
+.rp-cal-cell--active:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  border-color: rgba(59, 130, 246, 0.55);
+}
+
+.rp-cal-cell--live {
+  border-style: dashed;
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.rp-cal-daynum {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.rp-cal-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: auto;
+}
+
+.rp-cal-pnl {
+  font-size: 0.92rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-cal-count {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.rp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.rp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rp-legend-hint {
+  margin-left: auto;
+  font-style: italic;
+}
+
+.rp-swatch {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.rp-swatch--pos {
+  background: rgba(34, 197, 94, 0.342);
+  border: 1px solid rgba(34, 197, 94, 0.42);
+}
+
+.rp-swatch--neg {
+  background: rgba(239, 68, 68, 0.374);
+  border: 1px solid rgba(239, 68, 68, 0.44);
+}
+
+.rp-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.rp-modal[hidden] {
+  display: none;
+}
+
+.rp-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(1, 4, 9, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.rp-modal-panel {
+  position: relative;
+  width: min(960px, 100%);
+  max-height: min(85vh, 780px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.rp-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rp-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.rp-modal-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+}
+
+.rp-modal-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rp-modal-body {
+  padding: 10px 16px 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.rp-day-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.35fr) minmax(0, 0.65fr) minmax(0, 0.75fr) minmax(0, 0.5fr);
+  width: 100%;
+  font-size: 0.86rem;
+}
+
+.rp-day-grid__head {
+  padding: 6px 4px 8px;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+
+.rp-day-grid__cell {
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-day-grid__cell--pnl {
+  text-align: right;
+}
+
+.rp-day-grid__cell--dur,
+.rp-day-grid__cell--exit {
+  text-align: center;
+}
+
+.rp-day-grid__empty {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 720px) {
+  .rp-cal-cell {
+    min-height: 72px;
+  }
+
+  .rp-legend-hint {
+    margin-left: 0;
+    width: 100%;
+  }
+}
