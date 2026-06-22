@@ -428,7 +428,7 @@ button.rp-cal-cell.rp-cal-cell--neg {
 
 .rp-day-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.35fr) minmax(0, 0.65fr) minmax(0, 0.75fr) minmax(0, 0.5fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.55fr) minmax(0, 1.25fr) minmax(0, 0.65fr) minmax(0, 0.75fr) minmax(0, 0.5fr);
   width: 100%;
   font-size: 0.86rem;
 }
@@ -455,7 +455,8 @@ button.rp-cal-cell.rp-cal-cell--neg {
 }
 
 .rp-day-grid__cell--dur,
-.rp-day-grid__cell--exit {
+.rp-day-grid__cell--exit,
+.rp-day-grid__cell--trend {
   text-align: center;
 }
 

@@ -23,8 +23,12 @@ def flash_ts_to_regime_key(flash_ts: str | None) -> tuple[str, str] | None:
     return format_day_label(floor.date()), f"{floor.hour:02d}H00"
 
 
-def build_regime_lookup(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
-    """Index (date, heure) → OUI/NON depuis btc_regime_dates."""
+def build_regime_lookup(
+    conn: sqlite3.Connection,
+    *,
+    overrides: dict[tuple[str, str], str] | None = None,
+) -> dict[tuple[str, str], str]:
+    """Index (date, heure) → OUI/NON depuis btc_regime_dates (+ surcharges simulation)."""
     lookup: dict[tuple[str, str], str] = {}
     for row in db_manager.fetch_btc_regime_dates(conn):
         date_label = normalize_date_label(str(row["date_range"]))
@@ -34,7 +38,30 @@ def build_regime_lookup(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
         etat = str(row["etat"] or "").strip().upper()
         if etat in ("OUI", "NON"):
             lookup[(date_label, heure)] = etat
+    if overrides:
+        lookup.update(overrides)
     return lookup
+
+
+def parse_regime_overrides(
+    raw: dict[str, str] | None,
+) -> dict[tuple[str, str], str] | None:
+    """Convertit ``{\"15-juin|04H00\": \"NON\", ...}`` en clés internes."""
+    if not raw:
+        return None
+    out: dict[tuple[str, str], str] = {}
+    for key, etat in raw.items():
+        etat_u = str(etat or "").strip().upper()
+        if etat_u not in ("OUI", "NON"):
+            continue
+        parts = str(key).split("|", 1)
+        if len(parts) != 2:
+            continue
+        day = normalize_date_label(parts[0].strip())
+        heure = normalize_heure(parts[1].strip())
+        if day and heure:
+            out[(day, heure)] = etat_u
+    return out or None
 
 
 def normalize_regime_etats(
@@ -42,7 +69,9 @@ def normalize_regime_etats(
     regime_oui: bool = True,
     regime_non: bool = True,
 ) -> frozenset[str] | None:
-    """None = pas de filtre (OUI + NON cochés)."""
+    """``None`` = filtre BTC ON/OFF désactivé (les deux cochés ou aucun coché)."""
+    if not regime_oui and not regime_non:
+        return None
     if regime_oui and regime_non:
         return None
     allowed: set[str] = set()

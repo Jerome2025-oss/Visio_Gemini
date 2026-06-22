@@ -20,7 +20,7 @@
 {% for a in analyses %}
 <div class="funnel-card">
   <div class="funnel-card__head">
-    <span class="funnel-card__title">⚡ {{ a.token }} — Entonnoir Ichimoku 3TF</span>
+    <span class="funnel-card__title">⚡ {{ a.token }}{% if a.ichimoku_done %} — Entonnoir Ichimoku 3TF{% else %} — FLASH{% endif %}</span>
     <span class="funnel-card__meta">
       #{{ a.id }}
       {% if a.signal_time %} · 🕐 signal {{ a.signal_time }} UTC{% endif %}
@@ -28,7 +28,24 @@
     </span>
   </div>
 
-  {% if a.charts or a.btc_chart %}
+  {% if not a.ichimoku_done %}
+  <div class="funnel-thumb__warn">ℹ️ Entonnoir Ichimoku en pause — flash enregistré, simulation backtest disponible.</div>
+  {% if a.btc_chart %}
+  <div class="funnel-thumbs">
+    {% set btc_url = a.btc_chart | png_url %}
+    <div class="funnel-thumb funnel-thumb--btc">
+      <span class="funnel-thumb__tf funnel-thumb__tf--btc">BTC H4</span>
+      {% if btc_url %}
+      <a href="{{ btc_url }}" target="_blank" rel="noopener" title="Contexte macro BTC H4{% if a.btc_h4_snapshot %} · {{ a.btc_h4_snapshot }}{% endif %}">
+        <img class="thumb thumb--btc" src="{{ btc_url }}" alt="BTC H4 contexte macro">
+      </a>
+      {% else %}
+      <span class="funnel-thumb__warn">⚠️ BTC H4 indisponible</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% elif a.charts or a.btc_chart %}
   <div class="funnel-thumbs">
     {% for chart in a.charts %}
     {% set url = chart | png_url %}
@@ -57,12 +74,12 @@
     </div>
     {% endif %}
   </div>
-  {% else %}
+  {% elif a.ichimoku_done %}
   <div class="funnel-thumb__warn">⚠️ Charts non enregistrés pour cette analyse.</div>
   {% endif %}
 
   <div class="funnel-verdict">
-    <span class="badge badge-{{ a.score_color }}">🎯 CONFIANCE : {% if a.score_display %}{{ a.score_display }}/10{% else %}—{% endif %}</span>
+    <span class="badge badge-{{ a.score_color }}">🎯 CONFIANCE : {% if a.score_display %}{{ a.score_display }}/10{% elif not a.ichimoku_done %}— (pas d'analyse){% else %}—{% endif %}</span>
     {% if a.decision %}
     <span class="badge badge-{{ a.decision_color }}">📌 {{ a.decision }}</span>
     {% endif %}

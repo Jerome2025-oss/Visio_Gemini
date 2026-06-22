@@ -684,6 +684,63 @@ th {
   height: 100% !important;
 }
 
+.btc-trend-table-panel {
+  margin-top: 1rem;
+}
+
+.btc-trend-days {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.btc-trend-day__label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.btc-trend-table-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.btc-trend-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.btc-trend-table th,
+.btc-trend-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.btc-trend-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.btc-trend-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.btc-trend-table tr.is-backfill {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+.btc-trend-table-empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 1.25rem !important;
+}
+
 @media (max-width: 900px) {
   .btc-trend-grid {
     grid-template-columns: 1fr;
@@ -1485,6 +1542,55 @@ th {
 
 .btc-regime-slot-dot--muted {
   background: #64748b;
+}
+
+.btc-regime-slot-dot--clickable {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.btc-regime-slot-dot--clickable:hover {
+  transform: scale(1.25);
+}
+
+.btc-regime-slot-dot--sim-override {
+  box-shadow: 0 0 0 2px #f59e0b;
+}
+
+.btc-regime-sim-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.btc-regime-sim-toolbar--off {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.btc-regime-sim-hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.regime-sim-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fcd34d;
+}
+
+.regime-sim-banner[hidden] {
+  display: none !important;
 }
 
 .btc-regime-day__counts {

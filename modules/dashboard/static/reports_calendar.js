@@ -110,6 +110,9 @@
       btc_faible: byId("rp-filtre-btc-faible").checked,
       regime_oui: byId("rp-filtre-regime-oui").checked,
       regime_non: byId("rp-filtre-regime-non").checked,
+      trend_10: byId("rp-filtre-trend-10").checked,
+      trend_5: byId("rp-filtre-trend-5").checked,
+      trend_0: byId("rp-filtre-trend-0").checked,
     };
   }
 
@@ -185,6 +188,10 @@
     q.set("btc_faible", params.btc_faible ? "true" : "false");
     q.set("regime_oui", params.regime_oui ? "true" : "false");
     q.set("regime_non", params.regime_non ? "true" : "false");
+    q.set("trend_10", params.trend_10 ? "true" : "false");
+    q.set("trend_5", params.trend_5 ? "true" : "false");
+    q.set("trend_0", params.trend_0 ? "true" : "false");
+    if (window.RegimeSim) RegimeSim.appendToUrlSearchParams(q);
     (params.filtres || []).forEach((f) => q.append("filtres", f));
     return q.toString();
   }
@@ -390,6 +397,15 @@
     bindModalOnce();
   }
 
+  function trendBadgeHtml(score, badge) {
+    if (score == null || score === "") return "—";
+    const n = Number(score);
+    const cls =
+      badge ||
+      (n >= 10 ? "green" : n >= 5 ? "yellow" : n >= 0 ? "red" : "muted");
+    return '<span class="badge badge-' + cls + '">' + esc(String(n)) + "</span>";
+  }
+
   function bindModalOnce() {
     if (modalBound) return;
     modalBound = true;
@@ -416,12 +432,15 @@
       kpi("Win rate", d.win_rate + "%");
 
     const grid = byId("rp-cal-modal-trades");
-    const trades = d.trades || [];
+    const trades = (d.trades || []).slice().sort(function (a, b) {
+      return (a.entry_ts || "").localeCompare(b.entry_ts || "");
+    });
     if (!trades.length) {
       grid.innerHTML = '<p class="rp-empty rp-day-grid__empty">Aucun trade.</p>';
     } else {
       let cells =
         '<span class="rp-day-grid__head">Token</span>' +
+        '<span class="rp-day-grid__head">Tendance H4</span>' +
         '<span class="rp-day-grid__head">Horaires</span>' +
         '<span class="rp-day-grid__head">Durée</span>' +
         '<span class="rp-day-grid__head">PnL</span>' +
@@ -430,6 +449,9 @@
         const range = fmtModalRange(t.entry_ts, t.exit_ts, dateKey);
         cells +=
           '<span class="rp-day-grid__cell rp-day-grid__cell--token">' + esc(t.symbol) + "</span>" +
+          '<span class="rp-day-grid__cell rp-day-grid__cell--trend">' +
+          trendBadgeHtml(t.trend_h4_score, t.trend_h4_badge) +
+          "</span>" +
           '<span class="rp-day-grid__cell rp-day-grid__cell--range">' + esc(range) + "</span>" +
           '<span class="rp-day-grid__cell rp-day-grid__cell--dur">' + esc(fmtDurationShort(t.duration_min)) + "</span>" +
           '<span class="rp-day-grid__cell rp-day-grid__cell--pnl ' + pnlClass(t.pnl_pct) + '">' + fmtPct(t.pnl_pct) + "</span>" +
@@ -453,13 +475,23 @@
 
   async function runCalendar() {
     const params = getParams();
-    const q = buildQuery(params);
     const btn = byId("rp-apply");
     btn.disabled = true;
     const t0 = Date.now();
     setStatus("Calcul simulation Visio Gemini…");
     try {
-      const dataResp = await fetch("/reports/calendar/data?" + q);
+      const overrides = window.RegimeSim && RegimeSim.overridesForApi();
+      let dataResp;
+      if (overrides) {
+        dataResp = await fetch("/reports/calendar/data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ ...params, regime_overrides: overrides }),
+        });
+      } else {
+        const q = buildQuery(params);
+        dataResp = await fetch("/reports/calendar/data?" + q);
+      }
       const payload = await dataResp.json();
       if (!dataResp.ok || !payload.ok) {
         throw new Error(payload.detail || payload.error || "Calendrier indisponible");
@@ -470,7 +502,10 @@
       setStatus(
         fmtPeriodLabel(rangeFrom, rangeTo) + " · " +
         params.leverage + "× · TP " + params.tp + "% · SL " + params.sl + "% · " +
-        (payload.n_trades || 0) + " trades · " + secs + "s"
+        (payload.n_trades || 0) + " trades · " + secs + "s" +
+        (payload.regime_overrides_applied
+          ? " · " + payload.regime_overrides_applied + " pastille(s) sim."
+          : "")
       );
       renderCalendar(payload.data || payload, {
         params,
@@ -483,6 +518,10 @@
     } finally {
       btn.disabled = false;
     }
+  }
+
+  function updateSimBanner() {
+    if (window.RegimeSim) RegimeSim.refreshBanner();
   }
 
   byId("rp-apply").addEventListener("click", runCalendar);
@@ -498,4 +537,5 @@
   byId("rp-filtre-btc10").addEventListener("change", () => onFiltreChange("btc10"));
 
   ensureDefaultDates();
+  updateSimBanner();
 })();

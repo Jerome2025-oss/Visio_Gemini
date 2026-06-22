@@ -71,6 +71,30 @@ CREATE INDEX IF NOT EXISTS idx_btc_scans_snapshot
     ON btc_scans (btc_h4_snapshot);
 """
 
+# Journal normalisé des points du graphique Tendance BTC H4 (indicateur futur).
+_BTC_TREND_POINTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS btc_trend_points (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_utc  TEXT    NOT NULL,
+    jour          TEXT    NOT NULL,
+    heure         TEXT    NOT NULL,
+    score         INTEGER NOT NULL,
+    source        TEXT    NOT NULL,
+    analyse_id    INTEGER,
+    tenkan_slope  TEXT,
+    above_tenkan  INTEGER,
+    scheduled     INTEGER NOT NULL DEFAULT 0,
+    backfill      INTEGER NOT NULL DEFAULT 0,
+    note          TEXT,
+    synced_at     TEXT    NOT NULL
+);
+"""
+
+_BTC_TREND_POINTS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_btc_trend_points_snapshot
+    ON btc_trend_points (snapshot_utc);
+"""
+
 # Régimes macro BTC H4 par plages de dates (page Date ON/OFF).
 _BTC_REGIME_DATES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS btc_regime_dates (
@@ -222,6 +246,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _drop_legacy_usdtd_regime_tables(conn)
     _migrate_btc_regime_dates_slot_unique(conn)
     _migrate_scores_from_recap(conn)
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_analyses_token_signal
+            ON analyses_ichimoku (token, signal_time_utc)
+        """
+    )
+    conn.commit()
+
+
+# Décision réservée aux scans BTC H4 planifiés (exclue des compteurs FLASH).
+BTC_H4_SCAN_DECISION = "BTC H4 SCAN"
 
 
 def _migrate_btc_regime_dates_slot_unique(conn: sqlite3.Connection) -> None:
@@ -326,6 +361,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_INDEX)
     conn.executescript(_BTC_SCANS_SCHEMA)
     conn.executescript(_BTC_SCANS_INDEX)
+    conn.executescript(_BTC_TREND_POINTS_SCHEMA)
+    conn.executescript(_BTC_TREND_POINTS_INDEX)
     conn.executescript(_BTC_REGIME_DATES_SCHEMA)
     conn.executescript(_BTC_REGIME_DATES_INDEX)
     conn.executescript(_BTC_REGIME_STATE_SCHEMA)
@@ -391,6 +428,52 @@ def fetch_btc_scans(
         SELECT id, btc_context_score, btc_h4_snapshot, source, note, created_at
         FROM btc_scans
         ORDER BY btc_h4_snapshot ASC
+        """
+    ).fetchall()
+
+
+def replace_btc_trend_points(
+    conn: sqlite3.Connection,
+    rows: list[dict[str, object]],
+) -> int:
+    """Reconstruit le journal ``btc_trend_points`` depuis les sources brutes."""
+    now = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM btc_trend_points")
+    for row in rows:
+        conn.execute(
+            """
+            INSERT INTO btc_trend_points (
+                snapshot_utc, jour, heure, score, source, analyse_id,
+                tenkan_slope, above_tenkan, scheduled, backfill, note, synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["snapshot_utc"],
+                row["jour"],
+                row["heure"],
+                row["score"],
+                row["source"],
+                row.get("analyse_id"),
+                row.get("tenkan_slope"),
+                row.get("above_tenkan"),
+                int(row.get("scheduled") or 0),
+                int(row.get("backfill") or 0),
+                row.get("note"),
+                now,
+            ),
+        )
+    conn.commit()
+    return len(rows)
+
+
+def fetch_btc_trend_points(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Points du graphique tendance, triés chronologiquement."""
+    return conn.execute(
+        """
+        SELECT id, snapshot_utc, jour, heure, score, source, analyse_id,
+               tenkan_slope, above_tenkan, scheduled, backfill, note
+        FROM btc_trend_points
+        ORDER BY snapshot_utc ASC
         """
     ).fetchall()
 
@@ -511,6 +594,116 @@ def insert_analyse(
     return new_id
 
 
+def find_flash_by_signal(
+    conn: sqlite3.Connection,
+    token: str,
+    signal_time_utc: str | None,
+) -> int | None:
+    """Retourne l'id d'un FLASH déjà archivé (token + heure signal), ou None."""
+    if not signal_time_utc:
+        return None
+    row = conn.execute(
+        """
+        SELECT id FROM analyses_ichimoku
+        WHERE token = ? AND signal_time_utc = ?
+          AND (decision_ia IS NULL OR decision_ia != ?)
+        LIMIT 1
+        """,
+        (token.upper(), signal_time_utc, BTC_H4_SCAN_DECISION),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def is_ichimoku_analyzed_by_id(conn: sqlite3.Connection, analyse_id: int) -> bool:
+    row = conn.execute(
+        "SELECT score_ia, recap_complet FROM analyses_ichimoku WHERE id = ?",
+        (analyse_id,),
+    ).fetchone()
+    if not row:
+        return False
+    return row["score_ia"] is not None or bool(row["recap_complet"])
+
+
+def has_btc_h4_context(conn: sqlite3.Connection, analyse_id: int) -> bool:
+    row = conn.execute(
+        "SELECT btc_context_score FROM analyses_ichimoku WHERE id = ?",
+        (analyse_id,),
+    ).fetchone()
+    if not row:
+        return False
+    if "btc_context_score" not in row.keys():
+        return False
+    return row["btc_context_score"] is not None
+
+
+def update_ichimoku_result(
+    conn: sqlite3.Connection,
+    analyse_id: int,
+    *,
+    score_ia: float | None,
+    decision_ia: str | None,
+    recap_complet: str | None,
+    chart_paths: list[str] | None = None,
+) -> bool:
+    """Met à jour le résultat Ichimoku d'un FLASH déjà archivé."""
+    charts_json = json.dumps(chart_paths) if chart_paths else None
+    cur = conn.execute(
+        """
+        UPDATE analyses_ichimoku
+        SET score_ia = ?, decision_ia = ?, recap_complet = ?, chart_paths = ?
+        WHERE id = ?
+        """,
+        (score_ia, decision_ia, recap_complet, charts_json, analyse_id),
+    )
+    conn.commit()
+    updated = cur.rowcount > 0
+    if updated:
+        logger.info(
+            "🔄 Ichimoku mis à jour (id=%s, score=%s, décision=%s)",
+            analyse_id,
+            score_ia,
+            decision_ia,
+        )
+    return updated
+
+
+def archive_flash_message(
+    conn: sqlite3.Connection,
+    *,
+    token: str,
+    signal_time_utc: str,
+    btc_change_1h: float | None = None,
+    btc_change_5m: float | None = None,
+    btc_etat: str | None = None,
+    received_at: datetime | None = None,
+) -> tuple[int, bool]:
+    """Archive un FLASH Telegram. Retourne ``(id, créé)`` — ``créé=False`` si déjà présent."""
+    token = token.upper()
+    existing = find_flash_by_signal(conn, token, signal_time_utc)
+    if existing is not None:
+        return existing, False
+
+    received = received_at or _utcnow()
+    analysis_ts = received.strftime("%Y-%m-%d %H:%M:%S")
+    day = signal_time_utc[:10] if len(signal_time_utc) >= 10 else received.strftime("%Y-%m-%d")
+
+    analyse_id = insert_analyse(
+        conn,
+        token=token,
+        signal_time_utc=signal_time_utc,
+        score_ia=None,
+        decision_ia=None,
+        recap_complet=None,
+        chart_paths=None,
+        analysis_time_utc=analysis_ts,
+        date_jour=day,
+        btc_change_1h=btc_change_1h,
+        btc_change_5m=btc_change_5m,
+        btc_etat=btc_etat,
+    )
+    return analyse_id, True
+
+
 def recently_analyzed(
     conn: sqlite3.Connection,
     token: str,
@@ -536,6 +729,13 @@ def recently_analyzed(
         (token, threshold),
     ).fetchone()
     return row is not None
+
+
+def is_ichimoku_analyzed(row: sqlite3.Row | AnalyseRow) -> bool:
+    """True si l'entonnoir Ichimoku a produit un score ou un rapport."""
+    score = row["score_ia"] if isinstance(row, sqlite3.Row) else row.score_ia
+    recap = row["recap_complet"] if isinstance(row, sqlite3.Row) else row.recap_complet
+    return score is not None or bool(recap)
 
 
 def is_accepted(score_ia: float | int | None) -> bool:
@@ -736,7 +936,7 @@ def save_btc_regime_state(
 
 
 def get_funnel_listener_state(conn: sqlite3.Connection) -> dict[str, str | bool | None]:
-    """État pause/reprise de l'entonnoir Ichimoku (listener Telegram)."""
+    """État pause/reprise de l'entonnoir Ichimoku (les FLASH restent toujours enregistrés)."""
     row = conn.execute(
         "SELECT paused, updated_at FROM funnel_listener_state WHERE id = 1"
     ).fetchone()
@@ -753,7 +953,7 @@ def is_funnel_listener_paused(conn: sqlite3.Connection) -> bool:
 
 
 def set_funnel_listener_paused(conn: sqlite3.Connection, paused: bool) -> None:
-    """Pause ou reprend l'entonnoir Ichimoku 3TF (lu par auto_listener)."""
+    """Pause ou reprend l'entonnoir Ichimoku 3TF (n'empêche pas la réception des FLASH)."""
     now = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         """
@@ -767,7 +967,7 @@ def set_funnel_listener_paused(conn: sqlite3.Connection, paused: bool) -> None:
     )
     conn.commit()
     logger.info(
-        "🎚 Entonnoir Ichimoku 3TF %s (dashboard)",
+        "🎚 Entonnoir Ichimoku 3TF %s (FLASH toujours actifs)",
         "en pause" if paused else "repris",
     )
 

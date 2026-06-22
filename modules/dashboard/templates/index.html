@@ -24,7 +24,7 @@
               id="funnel-listener-status"
             >
               {% if funnel_listener.paused %}
-              ⏸ Entonnoir Ichimoku 3TF — en pause
+              ⏸ Entonnoir Ichimoku 3TF — en pause · FLASH actifs
               {% else %}
               ▶ Entonnoir Ichimoku 3TF — actif
               {% endif %}
@@ -35,7 +35,7 @@
               class="funnel-listener-btn{% if funnel_listener.paused %} funnel-listener-btn--resume{% else %} funnel-listener-btn--pause{% endif %}"
               data-paused="{{ '1' if funnel_listener.paused else '0' }}"
             >
-              {% if funnel_listener.paused %}▶ Reprendre{% else %}⏸ Pause{% endif %}
+              {% if funnel_listener.paused %}▶ Reprendre entonnoir{% else %}⏸ Pause entonnoir{% endif %}
             </button>
           </div>
           <div class="flash-toggle" role="group" aria-label="Filtre des flashs">
@@ -77,13 +77,13 @@
       function applyListenerState(state) {
         var paused = !!state.paused;
         btn.dataset.paused = paused ? "1" : "0";
-        btn.textContent = paused ? "▶ Reprendre" : "⏸ Pause";
+        btn.textContent = paused ? "▶ Reprendre entonnoir" : "⏸ Pause entonnoir";
         btn.classList.toggle("funnel-listener-btn--pause", !paused);
         btn.classList.toggle("funnel-listener-btn--resume", paused);
         statusEl.classList.toggle("funnel-listener-status--paused", paused);
         statusEl.classList.toggle("funnel-listener-status--active", !paused);
         statusEl.textContent = paused
-          ? "⏸ Entonnoir Ichimoku 3TF — en pause"
+          ? "⏸ Entonnoir Ichimoku 3TF — en pause · FLASH actifs"
           : "▶ Entonnoir Ichimoku 3TF — actif";
       }
 

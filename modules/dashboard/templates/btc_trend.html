@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Visio Gemini — Tendance BTC H4</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div class="wrap">
     {% set page_title = "Tendance BTC H4" %}
-    {% set page_subtitle = "Contexte macro Ichimoku · scans planifiés (5×/jour) + contexte flash" %}
+    {% set page_subtitle = "Contexte macro Ichimoku · scans planifiés (6×/jour H4) + contexte flash" %}
     {% set nav_active = "btc-trend" %}
     {% include "_dash_nav.html" %}
 
@@ -43,6 +44,65 @@
         <canvas id="btc-trend-chart"></canvas>
       </div>
     </section>
+
+    <section class="panel btc-trend-table-panel">
+      <div class="btc-chart-head">
+        <h2>Journal des notes</h2>
+        <p class="btc-trend-table-meta" id="btc-trend-table-meta">
+          {{ table_count }} point(s) · {{ table_days|length }} jour(s) · période {{ period }}
+        </p>
+      </div>
+      <div class="btc-trend-days" id="btc-trend-days">
+        {% if table_days %}
+        {% for day in table_days %}
+        <details class="btc-regime-day btc-trend-day">
+          <summary class="btc-regime-day__summary">
+            <span class="btc-regime-day__chev" aria-hidden="true"></span>
+            <span class="btc-regime-day__date">{{ day.jour }}</span>
+            <span class="btc-regime-day__head">
+              <span class="btc-regime-day__head-label">Dernière</span>
+              <span class="badge badge-{{ day.latest_badge }}">{{ day.latest_score }}</span>
+              <span class="btc-trend-day__label">{{ day.latest_label }}</span>
+            </span>
+            <span class="btc-regime-day__timeline" aria-label="Aperçu du jour">
+              {% for dot in day.dots %}
+              <span
+                class="btc-regime-slot-dot btc-regime-slot-dot--{{ dot.color }}"
+                title="{{ dot.heure }} · {{ dot.score }}/10"
+              ></span>
+              {% endfor %}
+            </span>
+            <span class="btc-regime-day__counts">{{ day.count }} scan(s)</span>
+          </summary>
+          <div class="table-wrap btc-regime-day__detail">
+            <table class="btc-trend-table btc-trend-table--detail">
+              <thead>
+                <tr>
+                  <th>Heure (UTC)</th>
+                  <th>Note</th>
+                  <th>Libellé</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in day.rows %}
+                <tr{% if row.backfill %} class="is-backfill"{% endif %}>
+                  <td>{{ row.heure }}</td>
+                  <td><span class="badge badge-{{ 'green' if row.score >= 10 else ('yellow' if row.score >= 5 else 'red') }}">{{ row.score }}</span></td>
+                  <td>{{ row.scoreLabel }}</td>
+                  <td>{{ row.source }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+        {% endfor %}
+        {% else %}
+        <p class="empty btc-trend-table-empty">Aucun point pour cette période.</p>
+        {% endif %}
+      </div>
+    </section>
   </div>
 
   <script id="btc-initial" type="application/json">{{ chart_initial | tojson }}</script>
@@ -69,17 +129,132 @@
       return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
     }
 
-    function formatShortDate(snapshot) {
-      if (!snapshot) return "";
+    function parseSnapshotUtc(snapshot) {
+      if (!snapshot) return null;
       const raw = String(snapshot);
-      const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      const d = m
-        ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]))
-        : new Date(raw);
-      if (Number.isNaN(d.getTime())) return raw.slice(0, 10);
-      const day = d.getUTCDate();
-      const month = d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" });
-      return `${day} ${month}`;
+      const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+      if (m) {
+        return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));
+      }
+      const d = new Date(raw);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    function timeScaleConfig(period) {
+      const p = period || "30d";
+      if (p === "2d") {
+        return {
+          unit: "hour",
+          tooltipFormat: "yyyy-MM-dd HH:mm",
+          displayFormats: { hour: "HH:mm", day: "d MMM" },
+        };
+      }
+      if (p === "all") {
+        return {
+          unit: "day",
+          tooltipFormat: "yyyy-MM-dd HH:mm",
+          displayFormats: { day: "d MMM", week: "d MMM", month: "MMM yyyy" },
+        };
+      }
+      return {
+        unit: "day",
+        tooltipFormat: "yyyy-MM-dd HH:mm",
+        displayFormats: { day: "d MMM" },
+      };
+    }
+
+    function scoreBadgeClass(score) {
+      if (score >= 10) return "badge-green";
+      if (score >= 5) return "badge-yellow";
+      return "badge-red";
+    }
+
+    function groupRowsByDay(rows) {
+      const days = [];
+      let bucket = null;
+      for (const row of rows || []) {
+        const jour = row.jour || "";
+        if (!bucket || bucket.jour !== jour) {
+          bucket = { jour, rows: [] };
+          days.push(bucket);
+        }
+        bucket.rows.push(row);
+      }
+      return days.map((day) => {
+        const latest = day.rows[0];
+        const dots = day.rows.slice().reverse().map((row) => ({
+          heure: row.heure,
+          score: Number(row.score),
+          color: scoreBadgeClass(Number(row.score)).replace("badge-", ""),
+        }));
+        return {
+          jour: day.jour,
+          rows: day.rows,
+          count: day.rows.length,
+          latest_score: latest.score,
+          latest_label: latest.scoreLabel,
+          latest_badge: scoreBadgeClass(Number(latest.score)).replace("badge-", ""),
+          dots,
+        };
+      });
+    }
+
+    function renderTrendTable(rows, period) {
+      const container = document.getElementById("btc-trend-days");
+      const meta = document.getElementById("btc-trend-table-meta");
+      if (!container) return;
+      const list = rows || [];
+      const days = groupRowsByDay(list);
+      if (meta) {
+        meta.textContent = `${list.length} point(s) · ${days.length} jour(s) · période ${period || currentPeriod}`;
+      }
+      if (!days.length) {
+        container.innerHTML = '<p class="empty btc-trend-table-empty">Aucun point pour cette période.</p>';
+        return;
+      }
+      container.innerHTML = days
+        .map((day) => {
+          const dots = day.dots
+            .map(
+              (dot) =>
+                `<span class="btc-regime-slot-dot btc-regime-slot-dot--${dot.color}" title="${dot.heure} · ${dot.score}/10"></span>`
+            )
+            .join("");
+          const body = day.rows
+            .map((row) => {
+              const backfill = row.backfill ? ' class="is-backfill"' : "";
+              const score = Number(row.score);
+              return (
+                `<tr${backfill}>` +
+                `<td>${row.heure || ""}</td>` +
+                `<td><span class="badge ${scoreBadgeClass(score)}">${score}</span></td>` +
+                `<td>${row.scoreLabel || ""}</td>` +
+                `<td>${row.source || ""}</td>` +
+                `</tr>`
+              );
+            })
+            .join("");
+          return (
+            `<details class="btc-regime-day btc-trend-day">` +
+            `<summary class="btc-regime-day__summary">` +
+            `<span class="btc-regime-day__chev" aria-hidden="true"></span>` +
+            `<span class="btc-regime-day__date">${day.jour}</span>` +
+            `<span class="btc-regime-day__head">` +
+            `<span class="btc-regime-day__head-label">Dernière</span>` +
+            `<span class="badge badge-${day.latest_badge}">${day.latest_score}</span>` +
+            `<span class="btc-trend-day__label">${day.latest_label || ""}</span>` +
+            `</span>` +
+            `<span class="btc-regime-day__timeline" aria-label="Aperçu du jour">${dots}</span>` +
+            `<span class="btc-regime-day__counts">${day.count} scan(s)</span>` +
+            `</summary>` +
+            `<div class="table-wrap btc-regime-day__detail">` +
+            `<table class="btc-trend-table btc-trend-table--detail">` +
+            `<thead><tr><th>Heure (UTC)</th><th>Note</th><th>Libellé</th><th>Source</th></tr></thead>` +
+            `<tbody>${body}</tbody>` +
+            `</table></div></details>`
+          );
+        })
+        .join("");
     }
 
     function registerBtcTooltipPositioner() {
@@ -103,18 +278,20 @@
     function renderTrend(labels, scores, pointColors, pointBackfill, pointMeta) {
       const ctx = document.getElementById("btc-trend-chart");
       if (trendChart) trendChart.destroy();
-      const meta = pointMeta || [];
       const bgZones = scores.map((s) => zoneBg(s));
       const radii = (pointBackfill || []).map((bf) => (bf ? 4 : 6));
       const snapshotLabels = labels;
+      const points = snapshotLabels.map((snap, i) => {
+        const when = parseSnapshotUtc(snap);
+        return when ? { x: when.getTime(), y: scores[i] } : null;
+      }).filter(Boolean);
 
       trendChart = new Chart(ctx, {
         type: "line",
         data: {
-          labels: snapshotLabels,
           datasets: [{
             label: "",
-            data: scores,
+            data: points,
             borderColor: "#3b82f6",
             backgroundColor: "rgba(59, 130, 246, 0.08)",
             pointBackgroundColor: pointColors,
@@ -145,7 +322,8 @@
               grid: { color: "rgba(45, 58, 79, 0.6)" },
             },
             x: {
-              display: true,
+              type: "time",
+              time: timeScaleConfig(currentPeriod),
               ticks: {
                 color: "#8b9bb4",
                 maxRotation: 90,
@@ -153,7 +331,6 @@
                 autoSkip: true,
                 autoSkipPadding: 12,
                 maxTicksLimit: 18,
-                callback: (_value, index) => formatShortDate(snapshotLabels[index]),
               },
               grid: { display: false },
             },
@@ -200,6 +377,7 @@
         chart.pointBackfill || data.point_backfill,
         chart.pointMeta || data.point_meta
       );
+      renderTrendTable(data.table_rows || [], currentPeriod);
       document.querySelectorAll(".btc-period-btn").forEach((btn) => {
         btn.classList.toggle("is-active", btn.dataset.period === currentPeriod);
       });
@@ -218,6 +396,10 @@
       initialData.pointColors,
       initialData.pointBackfill,
       initialData.pointMeta
+    );
+    renderTrendTable(
+      {{ table_rows | tojson }},
+      initialData.period || "{{ period }}"
     );
   </script>
 </body>

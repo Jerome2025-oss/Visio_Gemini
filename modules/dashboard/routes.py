@@ -28,6 +28,9 @@ from modules.dashboard.backtest_temporal import (
     BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
     BACKTEST_TEMPO_DEFAULT_SL,
     BACKTEST_TEMPO_DEFAULT_TP,
+    BACKTEST_TEMPO_DEFAULT_TREND_0,
+    BACKTEST_TEMPO_DEFAULT_TREND_5,
+    BACKTEST_TEMPO_DEFAULT_TREND_10,
     TemporalFilter,
     clamp_project_date_debut,
     filter_flashes_temporal,
@@ -38,8 +41,15 @@ from modules.dashboard.backtest_temporal import (
 from modules.dashboard.btc_regime_filter import (
     build_regime_lookup,
     normalize_regime_etats,
+    parse_regime_overrides,
     passes_regime_filter,
     regime_etat_for_flash,
+)
+from modules.dashboard.btc_trend_filter import (
+    build_trend_score_timeline,
+    normalize_trend_scores,
+    passes_trend_filter,
+    trend_score_for_flash,
 )
 from modules.dashboard.btc_price import get_market_spot
 from modules.triggers import btc_context, db_manager
@@ -138,6 +148,7 @@ def _flash_view_with_btc(row: db_manager.AnalyseRow, raw: sqlite3.Row) -> dict:
             "btc_etat_badge_color": db_manager.btc_etat_badge_color(flash_btc["btc_etat"]),
             "btc_change_1h": flash_btc["btc_change_1h"],
             "btc_change_5m": flash_btc["btc_change_5m"],
+            "ichimoku_done": db_manager.is_ichimoku_analyzed(row),
         }
     )
     return view
@@ -353,7 +364,7 @@ class FunnelListenerPauseRequest(BaseModel):
 
 @router.get("/flash/listener/status")
 def flash_listener_status() -> JSONResponse:
-    """État pause/reprise entonnoir Ichimoku 3TF (listener Telegram)."""
+    """État pause/reprise entonnoir Ichimoku 3TF (FLASH toujours enregistrés)."""
     conn = db_manager.connect()
     try:
         state = db_manager.get_funnel_listener_state(conn)
@@ -364,7 +375,7 @@ def flash_listener_status() -> JSONResponse:
 
 @router.post("/flash/listener/pause")
 def flash_listener_pause(body: FunnelListenerPauseRequest) -> JSONResponse:
-    """Met en pause ou reprend l'entonnoir Ichimoku 3TF."""
+    """Met en pause ou reprend l'entonnoir Ichimoku 3TF (FLASH toujours enregistrés)."""
     conn = db_manager.connect()
     try:
         db_manager.set_funnel_listener_paused(conn, body.paused)
@@ -406,6 +417,60 @@ def _normalize_btc_period(period: str) -> str:
     return "30d"
 
 
+def _btc_trend_score_badge(score: int) -> str:
+    if score >= 10:
+        return "green"
+    if score >= 5:
+        return "yellow"
+    return "red"
+
+
+def _btc_trend_dot_color(score: int) -> str:
+    return _btc_trend_score_badge(score)
+
+
+def _group_trend_table_by_day(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Groupe le journal (récent → ancien) en sections repliables par jour."""
+    if not rows:
+        return []
+    days: list[dict[str, Any]] = []
+    current_jour: str | None = None
+    bucket: list[dict[str, Any]] = []
+    for row in rows:
+        jour = str(row.get("jour") or "")
+        if jour != current_jour:
+            if bucket and current_jour is not None:
+                days.append(_btc_trend_day_summary(current_jour, bucket))
+            current_jour = jour
+            bucket = [row]
+        else:
+            bucket.append(row)
+    if bucket and current_jour is not None:
+        days.append(_btc_trend_day_summary(current_jour, bucket))
+    return days
+
+
+def _btc_trend_day_summary(jour: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    latest = rows[0]
+    dots = [
+        {
+            "heure": r["heure"],
+            "score": r["score"],
+            "color": _btc_trend_dot_color(int(r["score"])),
+        }
+        for r in reversed(rows)
+    ]
+    return {
+        "jour": jour,
+        "rows": rows,
+        "count": len(rows),
+        "latest_score": latest["score"],
+        "latest_label": latest["scoreLabel"],
+        "latest_badge": _btc_trend_score_badge(int(latest["score"])),
+        "dots": dots,
+    }
+
+
 def _btc_trend_payload(period: str) -> dict:
     conn = db_manager.connect()
     try:
@@ -415,18 +480,27 @@ def _btc_trend_payload(period: str) -> dict:
 
     point_meta = [
         {
+            "jour": p["jour"],
+            "heure": p["heure"],
             "date": p["date_display"],
             "score": p["score"],
             "scoreLabel": p["score_label"],
             "source": p["source_label"],
             "note": p.get("note"),
+            "backfill": bool(p.get("backfill")),
         }
         for p in points
     ]
 
+    table_rows = list(reversed(point_meta))
+    table_days = _group_trend_table_by_day(table_rows)
+
     return {
         "period": period,
         "points": points,
+        "table_rows": table_rows,
+        "table_days": table_days,
+        "table_count": len(table_rows),
         "labels": [p["snapshot"] for p in points],
         "scores": [p["score"] for p in points],
         "point_colors": [
@@ -650,10 +724,13 @@ def _fetch_backtest_flashes(
     filtres: list[str] | None = None,
     etats: set[str] | None = None,
     regime_etats: frozenset[str] | None = None,
+    regime_overrides: dict[tuple[str, str], str] | None = None,
+    trend_scores: frozenset[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Liste brute des flashs Ichimoku pour le backtest (sans simulation)."""
     btc_context.ensure_btc_columns(conn)
-    regime_lookup = build_regime_lookup(conn)
+    regime_lookup = build_regime_lookup(conn, overrides=regime_overrides)
+    trend_timeline = build_trend_score_timeline(conn)
     active_etats = etats if etats is not None else _normalize_backtest_etats()
     rows = conn.execute(
         """
@@ -676,8 +753,11 @@ def _fetch_backtest_flashes(
         flash_ts = row["signal_time_utc"]
         if not passes_regime_filter(flash_ts, regime_lookup, regime_etats):
             continue
+        if not passes_trend_filter(flash_ts, trend_timeline, trend_scores):
+            continue
         btc = btc_context.read_btc_fields_from_row(row)
         flash_btc = _read_btc_flash_fields(row)
+        trend_h4 = trend_score_for_flash(flash_ts, trend_timeline)
         flashes.append(
             {
                 "id": int(row["id"]),
@@ -691,6 +771,8 @@ def _fetch_backtest_flashes(
                 "btc_score": btc.get("btc_context_score"),
                 "btc_badge": btc_context.btc_badge_color(btc.get("btc_context_score")),
                 "regime_onoff": regime_etat_for_flash(flash_ts, regime_lookup),
+                "trend_h4_score": trend_h4,
+                "trend_h4_badge": btc_context.btc_badge_color(trend_h4),
                 **flash_btc,
             }
         )
@@ -761,6 +843,8 @@ def _run_backtest_simulation(
                 "btc_score": flash.get("btc_score"),
                 "btc_change_1h": flash.get("btc_change_1h"),
                 "btc_change_5m": flash.get("btc_change_5m"),
+                "regime_onoff": flash.get("regime_onoff"),
+                **_trend_h4_fields_from_flash(flash),
             }
         )
         _enrich_row_optimal_tp(row, leverage=leverage, tp=tp)
@@ -923,6 +1007,15 @@ def _map_backtest_resultat(payload: dict[str, Any]) -> tuple[str, bool]:
     return "CLO_24H", False
 
 
+def _trend_h4_fields_from_flash(flash: dict[str, Any]) -> dict[str, Any]:
+    score = flash.get("trend_h4_score")
+    return {
+        "trend_h4_score": score,
+        "trend_h4_badge": flash.get("trend_h4_badge")
+        or btc_context.btc_badge_color(score if score is None else int(score)),
+    }
+
+
 def _backtest_row_from_sim(
     flash: dict[str, Any],
     payload: dict[str, Any] | None,
@@ -938,6 +1031,7 @@ def _backtest_row_from_sim(
             "pnl_pct": "—",
             "duree": "—",
             "provisional": False,
+            **_trend_h4_fields_from_flash(flash),
         }
     code, provisional = _map_backtest_resultat(payload)
     pnl = payload.get("pnl_pct")
@@ -963,6 +1057,7 @@ def _backtest_row_from_sim(
         "_pnl_all": pnl_float
         if pnl_float is not None and code in ("TP", "SL", "CLO_24H", "EN_COURS")
         else None,
+        **_trend_h4_fields_from_flash(flash),
     }
     for key in (
         "flash_id",
@@ -1112,6 +1207,33 @@ class BacktestRunRequest(BaseModel):
     btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE
     regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI
     regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON
+    trend_10: bool = BACKTEST_TEMPO_DEFAULT_TREND_10
+    trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5
+    trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0
+    regime_overrides: dict[str, str] | None = None
+
+
+def _coerce_regime_overrides(
+    raw: dict[str, str] | str | None,
+) -> dict[tuple[str, str], str] | None:
+    """Parse les surcharges simulation (JSON body ou query string)."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        import json
+
+        raw = json.loads(s)
+    if not isinstance(raw, dict):
+        return None
+    return parse_regime_overrides(raw)
+
+
+class CalendarDataRequest(BacktestRunRequest):
+    date_from: str | None = None
+    date_to: str | None = None
 
 
 @router.get("/backtest/chart")
@@ -1158,9 +1280,16 @@ def _fetch_backtest_flashes_temporal(
     etats: set[str],
     temporal: TemporalFilter,
     regime_etats: frozenset[str] | None = None,
+    regime_overrides: dict[tuple[str, str], str] | None = None,
+    trend_scores: frozenset[int] | None = None,
 ) -> list[dict[str, Any]]:
     flashes = _fetch_backtest_flashes(
-        conn, filtres=filtres, etats=etats, regime_etats=regime_etats
+        conn,
+        filtres=filtres,
+        etats=etats,
+        regime_etats=regime_etats,
+        regime_overrides=regime_overrides,
+        trend_scores=trend_scores,
     )
     return filter_flashes_temporal(flashes, temporal)
 
@@ -1174,6 +1303,8 @@ def _run_backtest_temporal_simulation(
     sl: float,
     temporal: TemporalFilter,
     regime_etats: frozenset[str] | None = None,
+    regime_overrides: dict[tuple[str, str], str] | None = None,
+    trend_scores: frozenset[int] | None = None,
 ) -> list[dict[str, Any]]:
     conn = db_manager.connect()
     try:
@@ -1183,6 +1314,8 @@ def _run_backtest_temporal_simulation(
             etats=etats,
             temporal=temporal,
             regime_etats=regime_etats,
+            regime_overrides=regime_overrides,
+            trend_scores=trend_scores,
         )
     finally:
         conn.close()
@@ -1211,6 +1344,8 @@ def _run_backtest_temporal_simulation(
                 "btc_score": flash.get("btc_score"),
                 "btc_change_1h": flash.get("btc_change_1h"),
                 "btc_change_5m": flash.get("btc_change_5m"),
+                "regime_onoff": flash.get("regime_onoff"),
+                **_trend_h4_fields_from_flash(flash),
             }
         )
         _enrich_row_optimal_tp(row, leverage=leverage, tp=tp)
@@ -1246,6 +1381,10 @@ def backtest_temporal_page(
     btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
     regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
     regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
+    trend_10: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_10),
+    trend_5: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_5),
+    trend_0: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_0),
+    regime_overrides: str | None = None,
 ) -> HTMLResponse:
     """Backtest temporel — même vue que l'historique + filtres date/heure."""
     from modules.dashboard.backtest_temporal import VISIO_PROJECT_MIN_DATE_STR
@@ -1257,6 +1396,8 @@ def backtest_temporal_page(
         btc_faible=btc_faible,
     )
     regime_etats = normalize_regime_etats(regime_oui=regime_oui, regime_non=regime_non)
+    trend_scores = normalize_trend_scores(trend_10=trend_10, trend_5=trend_5, trend_0=trend_0)
+    overrides = _coerce_regime_overrides(regime_overrides)
     temporal = resolve_temporal_filter(
         date_debut=clamp_project_date_debut(date_debut),
         date_fin=date_fin,
@@ -1272,6 +1413,8 @@ def backtest_temporal_page(
             etats=etats,
             temporal=temporal,
             regime_etats=regime_etats,
+            regime_overrides=overrides,
+            trend_scores=trend_scores,
         )
     finally:
         conn.close()
@@ -1290,6 +1433,9 @@ def backtest_temporal_page(
             "btc_faible": btc_faible,
             "regime_oui": regime_oui,
             "regime_non": regime_non,
+            "trend_10": trend_10,
+            "trend_5": trend_5,
+            "trend_0": trend_0,
             "date_debut": temporal.date_debut.isoformat(),
             "date_fin": temporal.date_fin.isoformat(),
             "heure_debut": temporal.heure_debut,
@@ -1314,6 +1460,12 @@ def backtest_temporal_run(body: BacktestTemporalRunRequest) -> JSONResponse:
         regime_oui=body.regime_oui,
         regime_non=body.regime_non,
     )
+    trend_scores = normalize_trend_scores(
+        trend_10=body.trend_10,
+        trend_5=body.trend_5,
+        trend_0=body.trend_0,
+    )
+    regime_overrides = _coerce_regime_overrides(body.regime_overrides)
     temporal = resolve_temporal_filter(
         date_debut=clamp_project_date_debut(body.date_debut),
         date_fin=body.date_fin,
@@ -1328,6 +1480,8 @@ def backtest_temporal_run(body: BacktestTemporalRunRequest) -> JSONResponse:
         sl=body.sl,
         temporal=temporal,
         regime_etats=regime_etats,
+        regime_overrides=regime_overrides,
+        trend_scores=trend_scores,
     )
     stats = _compute_backtest_stats(raw_rows)
     resultats = []
@@ -1364,6 +1518,10 @@ def backtest_temporal_export_csv(
     btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
     regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
     regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
+    trend_10: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_10),
+    trend_5: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_5),
+    trend_0: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_0),
+    regime_overrides: str | None = None,
 ) -> Response:
     """Export CSV backtest temporel : simulation batch, colonnes du tableau uniquement."""
     filtres_norm = _normalize_backtest_filtres(filtres)
@@ -1373,6 +1531,8 @@ def backtest_temporal_export_csv(
         btc_faible=btc_faible,
     )
     regime_etats = normalize_regime_etats(regime_oui=regime_oui, regime_non=regime_non)
+    trend_scores = normalize_trend_scores(trend_10=trend_10, trend_5=trend_5, trend_0=trend_0)
+    overrides = _coerce_regime_overrides(regime_overrides)
     temporal = resolve_temporal_filter(
         date_debut=clamp_project_date_debut(date_debut),
         date_fin=date_fin,
@@ -1387,6 +1547,8 @@ def backtest_temporal_export_csv(
         sl=sl,
         temporal=temporal,
         regime_etats=regime_etats,
+        regime_overrides=overrides,
+        trend_scores=trend_scores,
     )
     csv_rows = [_backtest_table_csv_row(r) for r in sim_rows]
     content = _build_backtest_csv(csv_rows, fieldnames=_BACKTEST_TABLE_CSV_FIELDS)
@@ -1407,6 +1569,7 @@ class BacktestBatteryRunRequest(BaseModel):
     tp: float = Field(default=1.4, ge=0.1, le=50.0)
     sl: float = Field(default=2.0, ge=0.1, le=20.0)
     export_files: bool = False
+    regime_overrides: dict[str, str] | None = None
 
 
 @router.get("/backtest/battery", response_class=HTMLResponse)
@@ -1456,6 +1619,7 @@ def backtest_battery_run(body: BacktestBatteryRunRequest) -> JSONResponse:
         leverage=body.leverage,
         tp=body.tp,
         sl=body.sl,
+        regime_overrides=_coerce_regime_overrides(body.regime_overrides),
     )
     try:
         payload = run_battery(config)
@@ -1536,6 +1700,9 @@ def reports_calendar_page(
     btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
     regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
     regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
+    trend_10: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_10),
+    trend_5: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_5),
+    trend_0: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_0),
 ) -> HTMLResponse:
     """Calendrier journalier PnL — flashs Visio Gemini."""
     from modules.dashboard.reports_calendar import CALENDAR_MIN_DATE_STR
@@ -1560,6 +1727,9 @@ def reports_calendar_page(
             "btc_faible": btc_faible,
             "regime_oui": regime_oui,
             "regime_non": regime_non,
+            "trend_10": trend_10,
+            "trend_5": trend_5,
+            "trend_0": trend_0,
         },
     )
 
@@ -1577,8 +1747,71 @@ def reports_calendar_data(
     btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
     regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
     regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
+    trend_10: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_10),
+    trend_5: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_5),
+    trend_0: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_0),
+    regime_overrides: str | None = None,
 ) -> JSONResponse:
     """Calendrier PnL local (flashs Visio Gemini depuis le 14/06/2026)."""
+    return _reports_calendar_data_response(
+        leverage=leverage,
+        tp=tp,
+        sl=sl,
+        date_from=date_from,
+        date_to=date_to,
+        filtres=filtres,
+        btc_ok=btc_ok,
+        btc_reprise=btc_reprise,
+        btc_faible=btc_faible,
+        regime_oui=regime_oui,
+        regime_non=regime_non,
+        trend_10=trend_10,
+        trend_5=trend_5,
+        trend_0=trend_0,
+        regime_overrides=_coerce_regime_overrides(regime_overrides),
+    )
+
+
+@router.post("/reports/calendar/data")
+def reports_calendar_data_post(body: CalendarDataRequest) -> JSONResponse:
+    """Calendrier PnL — POST recommandé quand des pastilles simulation sont actives."""
+    return _reports_calendar_data_response(
+        leverage=body.leverage,
+        tp=body.tp,
+        sl=body.sl,
+        date_from=body.date_from,
+        date_to=body.date_to,
+        filtres=body.filtres,
+        btc_ok=body.btc_ok,
+        btc_reprise=body.btc_reprise,
+        btc_faible=body.btc_faible,
+        regime_oui=body.regime_oui,
+        regime_non=body.regime_non,
+        trend_10=body.trend_10,
+        trend_5=body.trend_5,
+        trend_0=body.trend_0,
+        regime_overrides=_coerce_regime_overrides(body.regime_overrides),
+    )
+
+
+def _reports_calendar_data_response(
+    *,
+    leverage: float,
+    tp: float,
+    sl: float,
+    date_from: str | None,
+    date_to: str | None,
+    filtres: list[str],
+    btc_ok: bool,
+    btc_reprise: bool,
+    btc_faible: bool,
+    regime_oui: bool,
+    regime_non: bool,
+    trend_10: bool,
+    trend_5: bool,
+    trend_0: bool,
+    regime_overrides: dict[tuple[str, str], str] | None,
+) -> JSONResponse:
     from modules.dashboard.reports_calendar import build_calendar_data
 
     try:
@@ -1594,6 +1827,10 @@ def reports_calendar_data(
             btc_faible=btc_faible,
             regime_oui=regime_oui,
             regime_non=regime_non,
+            trend_10=trend_10,
+            trend_5=trend_5,
+            trend_0=trend_0,
+            regime_overrides=regime_overrides,
         )
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)

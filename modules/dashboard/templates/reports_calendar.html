@@ -6,6 +6,7 @@
   <title>Visio Gemini — Calendrier</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/reports_calendar.css">
+  <script src="/static/regime_simulation.js" defer></script>
 </head>
 <body data-calendar-min="{{ calendar_min_date }}">
   <div class="wrap rp-cal-page">
@@ -13,6 +14,8 @@
     {% set page_subtitle = "PnL par jour · trades simulés (TP/SL/clôture 24h/en cours) · filtres alignés backtest TEMPO" %}
     {% set nav_active = "reports-calendar" %}
     {% include "_dash_nav.html" %}
+
+    <p id="regime-sim-banner" class="regime-sim-banner" hidden></p>
 
     <section class="panel">
       <div class="rp-filters">
@@ -79,6 +82,21 @@
           <label class="backtest-toggle">
             <input type="checkbox" id="rp-filtre-regime-non"{% if regime_non %} checked{% endif %}>
             <span class="backtest-toggle__face">🔴 NON</span>
+          </label>
+        </div>
+        <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="Tendance BTC H4">
+          <span class="backtest-filtre-label">Tendance H4</span>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-trend-10"{% if trend_10 %} checked{% endif %}>
+            <span class="backtest-toggle__face">🟢 10</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-trend-5"{% if trend_5 %} checked{% endif %}>
+            <span class="backtest-toggle__face">🟡 5</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="rp-filtre-trend-0"{% if trend_0 %} checked{% endif %}>
+            <span class="backtest-toggle__face">🔴 0</span>
           </label>
         </div>
         <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="État BTC flash">

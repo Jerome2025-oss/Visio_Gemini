@@ -6,11 +6,12 @@
 ║  1. Connexion Telethon au canal de Jérôme (id depuis .env)                ║
 ║  2. Réception d'un message « ⚡ FLASH — XXXUSDT … réveil confirmé »       ║
 ║  3. Extraction du TOKEN + de l'heure du signal (ligne « 🕐 … UTC »)       ║
-║  4. Anti-doublon : on ignore un token déjà analysé il y a < 30 min        ║
-║  5. File d'attente séquentielle (1 entonnoir à la fois — Playwright)     ║
-║  6. Déclenchement de l'entonnoir Ichimoku 3 TF (H4/H1/M15) via run_funnel ║
-║  7. Parsing du rapport Gemini (score /10 + décision)                      ║
-║  8. Sauvegarde en base SQLite (db_manager)                                ║
+║  4. Archivage immédiat en base (token + heure + voyant BTC Telegram)      ║
+║  5. Anti-doublon : token + heure signal (repli 30 min si heure absente)   ║
+║  6. File d'attente séquentielle (1 traitement à la fois)                  ║
+║  7. Si entonnoir actif : Ichimoku 3 TF puis mise à jour de la ligne       ║
+║     Si entonnoir en pause : ligne FLASH seule (sans Gemini)               ║
+║  8. Contexte BTC H4 si pas encore renseigné                               ║
 ║                                                                           ║
 ║  ⚠ run_funnel utilise Playwright en API SYNC : il est exécuté dans un     ║
 ║    thread (asyncio.to_thread) pour ne pas bloquer/casser la boucle async. ║
@@ -27,6 +28,7 @@ import logging
 import os
 import re
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -49,7 +51,7 @@ _queued_or_running: set[str] = set()
 
 # ── Expressions régulières d'extraction ───────────────────────────────────
 # « ⚡ FLASH — XTZUSDT »  →  capture « XTZUSDT » (tirets longs/normaux acceptés).
-_TOKEN_RE = re.compile(r"FLASH\s*[—–\-:]\s*([A-Z0-9]{2,20}USDT)", re.IGNORECASE)
+_TOKEN_RE = re.compile(r"FLASH\s*[—–\-:]\s*([A-Z0-9]{1,20}USDT)", re.IGNORECASE)
 # « 🕐 2026-06-13 10:22:47 UTC »  →  capture « 2026-06-13 10:22:47 ».
 _SIGNAL_TIME_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*UTC", re.IGNORECASE
@@ -128,6 +130,67 @@ def parse_btc_flash_metrics(
     return change_1h, change_5m, etat
 
 
+def resolve_signal_time(
+    text: str,
+    *,
+    fallback: datetime | None = None,
+) -> str | None:
+    """Heure UTC du signal (ligne 🕐) ou repli sur la date du message Telegram."""
+    ts = extract_signal_time(text)
+    if ts:
+        return ts
+    if fallback is not None:
+        fb = fallback if fallback.tzinfo else fallback.replace(tzinfo=timezone.utc)
+        return fb.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return None
+
+
+def archive_flash_from_text(
+    conn,
+    text: str,
+    *,
+    received_at: datetime | None = None,
+) -> tuple[int | None, bool]:
+    """Archive un message FLASH Telegram. Retourne ``(id, créé)``."""
+    if not is_flash_signal(text):
+        return None, False
+    token = extract_token(text)
+    if not token:
+        return None, False
+    signal_time = resolve_signal_time(text, fallback=received_at)
+    if not signal_time:
+        logger.warning("⚠ FLASH %s sans horodatage — ignoré.", token)
+        return None, False
+
+    existing = find_flash_by_signal(conn, token, signal_time)
+    if existing is not None:
+        return existing, False
+
+    if extract_signal_time(text) is None and received_at is None and db_manager.recently_analyzed(
+        conn, token, within_minutes=DEDUPE_MINUTES
+    ):
+        logger.info(
+            "⏭ %s sans heure signal, déjà enregistré récemment — ignoré.",
+            token,
+        )
+        return None, False
+
+    btc_change_1h, btc_change_5m, btc_etat = parse_btc_flash_metrics(text)
+    return db_manager.archive_flash_message(
+        conn,
+        token=token,
+        signal_time_utc=signal_time,
+        btc_change_1h=btc_change_1h,
+        btc_change_5m=btc_change_5m,
+        btc_etat=btc_etat,
+        received_at=received_at,
+    )
+
+
+def find_flash_by_signal(conn, token: str, signal_time_utc: str | None) -> int | None:
+    return db_manager.find_flash_by_signal(conn, token, signal_time_utc)
+
+
 def normalize_decision(text: str | None) -> str | None:
     """Normalise la décision Gemini en ``TRADE LONG`` / ``TRADE SHORT`` / ``PAS DE TRADE``."""
     if not text:
@@ -155,7 +218,7 @@ def _run_funnel_blocking(
 
 
 async def process_signal(text: str) -> None:
-    """Traite un message : extraction → anti-doublon → entonnoir → sauvegarde.
+    """Archive le FLASH puis lance Ichimoku/BTC H4 si configuré.
 
     Appelé par le worker de file (un flash à la fois). Ne lève jamais.
     """
@@ -167,63 +230,72 @@ async def process_signal(text: str) -> None:
         logger.warning("⚠ Signal FLASH détecté mais token introuvable — ignoré.")
         return
 
-    signal_time = extract_signal_time(text)
-    btc_change_1h, btc_change_5m, btc_etat = parse_btc_flash_metrics(text)
+    signal_time = resolve_signal_time(text)
     logger.info("▶ Traitement file : token=%s, heure_signal=%s", token, signal_time)
 
     conn = db_manager.connect()
     try:
-        if db_manager.is_funnel_listener_paused(conn):
+        analyse_id, created = archive_flash_from_text(conn, text)
+        if analyse_id is None:
+            return
+        if not created:
             logger.info(
-                "⏸ Entonnoir en pause — %s retiré de la file sans analyse.",
+                "⏭ %s @ %s déjà archivé (id=%s)",
                 token,
-            )
-            return
-        if db_manager.recently_analyzed(conn, token, within_minutes=DEDUPE_MINUTES):
-            logger.info(
-                "⏭ %s déjà analysé il y a < %s min — entonnoir ignoré (anti-doublon).",
-                token,
-                DEDUPE_MINUTES,
-            )
-            return
-
-        logger.info("🚀 Lancement de l'entonnoir Ichimoku 3 TF pour %s…", token)
-        try:
-            score, decision, recap, charts = await asyncio.to_thread(
-                _run_funnel_blocking, token
-            )
-        except Exception as exc:  # échec capture / LLM : on log et on continue
-            logger.error("❌ Analyse %s échouée : %s", token, exc)
-            return
-
-        analyse_id = db_manager.insert_analyse(
-            conn,
-            token=token,
-            signal_time_utc=signal_time,
-            score_ia=score,
-            decision_ia=decision,
-            recap_complet=recap,
-            chart_paths=charts,
-            btc_change_1h=btc_change_1h,
-            btc_change_5m=btc_change_5m,
-            btc_etat=btc_etat,
-        )
-        logger.info(
-            "✅ %s analysé (id=%s) → score=%s/10, décision=%s, btc_etat=%s",
-            token,
-            analyse_id,
-            score,
-            decision,
-            btc_etat,
-        )
-        try:
-            await asyncio.to_thread(btc_context.run_btc_h4_context, analyse_id)
-        except Exception as exc:
-            logger.error(
-                "❌ Contexte BTC H4 échoué (non bloquant, id=%s) : %s",
+                signal_time,
                 analyse_id,
-                exc,
             )
+
+        funnel_paused = db_manager.is_funnel_listener_paused(conn)
+        if (
+            not funnel_paused
+            and not db_manager.is_ichimoku_analyzed_by_id(conn, analyse_id)
+        ):
+            logger.info("🚀 Lancement de l'entonnoir Ichimoku 3 TF pour %s…", token)
+            try:
+                score, decision, recap, charts = await asyncio.to_thread(
+                    _run_funnel_blocking, token
+                )
+            except Exception as exc:
+                logger.error(
+                    "❌ Ichimoku %s échoué (flash id=%s déjà archivé) : %s",
+                    token,
+                    analyse_id,
+                    exc,
+                )
+            else:
+                db_manager.update_ichimoku_result(
+                    conn,
+                    analyse_id,
+                    score_ia=score,
+                    decision_ia=decision,
+                    recap_complet=recap,
+                    chart_paths=charts,
+                )
+                logger.info(
+                    "✅ %s Ichimoku (id=%s) → score=%s/10, décision=%s",
+                    token,
+                    analyse_id,
+                    score,
+                    decision,
+                )
+        elif funnel_paused:
+            logger.info(
+                "📥 FLASH %s archivé (id=%s) — entonnoir Ichimoku en pause",
+                token,
+                analyse_id,
+            )
+
+        btc_context.ensure_btc_columns(conn)
+        if not db_manager.has_btc_h4_context(conn, analyse_id):
+            try:
+                await asyncio.to_thread(btc_context.run_btc_h4_context, analyse_id)
+            except Exception as exc:
+                logger.error(
+                    "❌ Contexte BTC H4 échoué (non bloquant, id=%s) : %s",
+                    analyse_id,
+                    exc,
+                )
     finally:
         conn.close()
 
@@ -238,18 +310,7 @@ async def enqueue_flash_signal(text: str) -> None:
         logger.warning("⚠ Signal FLASH détecté mais token introuvable — ignoré.")
         return
 
-    conn = db_manager.connect()
-    try:
-        if db_manager.is_funnel_listener_paused(conn):
-            logger.info(
-                "⏸ Entonnoir en pause — FLASH %s ignoré (reprise via dashboard).",
-                token,
-            )
-            return
-    finally:
-        conn.close()
-
-    signal_time = extract_signal_time(text)
+    signal_time = resolve_signal_time(text)
     if token in _queued_or_running:
         logger.info(
             "⏭ %s déjà en file ou en cours d'analyse — doublon simultané ignoré.",
@@ -259,9 +320,18 @@ async def enqueue_flash_signal(text: str) -> None:
 
     conn = db_manager.connect()
     try:
-        if db_manager.recently_analyzed(conn, token, within_minutes=DEDUPE_MINUTES):
+        if signal_time and find_flash_by_signal(conn, token, signal_time) is not None:
             logger.info(
-                "⏭ %s déjà analysé il y a < %s min — ignoré avant mise en file.",
+                "⏭ %s @ %s déjà archivé — ignoré avant mise en file.",
+                token,
+                signal_time,
+            )
+            return
+        if not signal_time and db_manager.recently_analyzed(
+            conn, token, within_minutes=DEDUPE_MINUTES
+        ):
+            logger.info(
+                "⏭ %s déjà enregistré il y a < %s min — ignoré avant mise en file.",
                 token,
                 DEDUPE_MINUTES,
             )

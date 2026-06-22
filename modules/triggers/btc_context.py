@@ -25,9 +25,27 @@ BTC_AGENT_ID = "agent_Ichimoku"
 BTC_TIMEFRAME = "4h"
 BTC_TOKEN = "BTCUSDT"
 BTC_SCHEDULED_DECISION = "BTC H4 SCAN"
+# Créneaux H4 UTC — timer systemd : 6 scans/jour (une fois par bougie H4).
+BTC_SCHEDULED_HOURS_UTC: tuple[int, ...] = (0, 4, 8, 12, 16, 20)
 BACKFILL_VISUEL_SOURCE = db_manager.BACKFILL_VISUEL_SOURCE
 # Écart max entre btc_h4_snapshot (fin analyse) et timestamp du PNG (début capture).
 BTC_CHART_MATCH_MAX_SECONDS = 180
+
+_MOIS_FR = (
+    "",
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+)
 
 _PNG_TS_RE = re.compile(r"BTCUSDT\.P_4h_(\d{8})_(\d{6})\.png$", re.IGNORECASE)
 
@@ -295,6 +313,8 @@ def update_btc_context(
         ),
     )
     conn.commit()
+    if cur.rowcount > 0:
+        sync_btc_trend_points(conn)
     return cur.rowcount > 0
 
 
@@ -342,7 +362,7 @@ def run_btc_h4_context(analyse_id: int) -> int | None:
 
 
 def run_btc_h4_scheduled_scan() -> int | None:
-    """Scan BTC H4 planifié (systemd timer) : nouvelle ligne + capture + analyse.
+    """Scan BTC H4 planifié (systemd timer, 6×/jour aux clôtures H4 UTC).
 
     Indépendant du listener FLASH. Ne modifie aucune analyse Ichimoku existante.
     """
@@ -371,13 +391,27 @@ def run_btc_h4_scheduled_scan() -> int | None:
         return None
 
 
-def fetch_btc_trend_history(
-    conn: sqlite3.Connection,
-    *,
-    period: str = "7d",
-) -> list[dict]:
-    """Historique des scores BTC H4 pour la page tendance (Gemini + historique manuel)."""
+def format_trend_jour_fr(snapshot: str) -> str:
+    """Libellé jour pour tableau tendance : ``13 juin``."""
+    parsed = _parse_snapshot_iso(snapshot)
+    if parsed is None:
+        return snapshot[:10]
+    mois = _MOIS_FR[parsed.month] if 1 <= parsed.month <= 12 else str(parsed.month)
+    return f"{parsed.day} {mois}"
+
+
+def format_trend_heure(snapshot: str) -> str:
+    """Libellé heure UTC pour tableau tendance : ``05:00``."""
+    parsed = _parse_snapshot_iso(snapshot)
+    if parsed is None:
+        return ""
+    return parsed.strftime("%H:%M")
+
+
+def _collect_raw_trend_points(conn: sqlite3.Connection) -> list[dict]:
+    """Agrège les sources brutes (Gemini + backfill) avant matérialisation."""
     ensure_btc_columns(conn)
+    points: list[dict] = []
     rows = conn.execute(
         """
         SELECT id, btc_context_score, btc_h4_snapshot, btc_tenkan_slope,
@@ -388,7 +422,6 @@ def fetch_btc_trend_history(
         ORDER BY btc_h4_snapshot ASC
         """
     ).fetchall()
-    points: list[dict] = []
     for row in rows:
         points.append(
             {
@@ -402,6 +435,7 @@ def fetch_btc_trend_history(
                 "scheduled": row["decision_ia"] == BTC_SCHEDULED_DECISION,
                 "backfill": False,
                 "source": "gemini",
+                "analyse_id": int(row["id"]),
             }
         )
 
@@ -416,24 +450,85 @@ def fetch_btc_trend_history(
                 "scheduled": False,
                 "backfill": True,
                 "source": str(row["source"]),
+                "analyse_id": None,
                 "note": row["note"],
             }
         )
 
     points.sort(key=lambda p: p["snapshot"])
+    return points
+
+
+def sync_btc_trend_points(conn: sqlite3.Connection) -> int:
+    """Matérialise ``btc_trend_points`` depuis analyses_ichimoku + btc_scans."""
+    materialized: list[dict[str, object]] = []
+    for point in _collect_raw_trend_points(conn):
+        snap = str(point["snapshot"])
+        materialized.append(
+            {
+                "snapshot_utc": snap,
+                "jour": format_trend_jour_fr(snap),
+                "heure": format_trend_heure(snap),
+                "score": int(point["score"]),
+                "source": str(point["source"]),
+                "analyse_id": point.get("analyse_id"),
+                "tenkan_slope": point.get("tenkan_slope"),
+                "above_tenkan": (
+                    int(point["above_tenkan"])
+                    if point.get("above_tenkan") is not None
+                    else None
+                ),
+                "scheduled": int(bool(point.get("scheduled"))),
+                "backfill": int(bool(point.get("backfill"))),
+                "note": point.get("note"),
+            }
+        )
+    return db_manager.replace_btc_trend_points(conn, materialized)
+
+
+def _trend_point_from_row(row: sqlite3.Row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "score": int(row["score"]),
+        "snapshot": str(row["snapshot_utc"]),
+        "jour": str(row["jour"]),
+        "heure": str(row["heure"]),
+        "tenkan_slope": row["tenkan_slope"],
+        "above_tenkan": bool(row["above_tenkan"])
+        if row["above_tenkan"] is not None
+        else None,
+        "scheduled": bool(row["scheduled"]),
+        "backfill": bool(row["backfill"]),
+        "source": str(row["source"]),
+        "analyse_id": row["analyse_id"],
+        "note": row["note"],
+    }
+
+
+def fetch_btc_trend_history(
+    conn: sqlite3.Connection,
+    *,
+    period: str = "7d",
+) -> list[dict]:
+    """Historique des scores BTC H4 (table matérialisée + filtre période)."""
+    sync_btc_trend_points(conn)
+    points = [_trend_point_from_row(row) for row in db_manager.fetch_btc_trend_points(conn)]
     points = _filter_btc_trend_period(points, period)
     return [_enrich_trend_point(p) for p in points]
 
 
 def _enrich_trend_point(p: dict) -> dict:
-    """Métadonnées affichage graphique / tooltip."""
+    """Métadonnées affichage graphique / tooltip / tableau."""
     score = p.get("score")
     note = p.get("note")
+    snap = str(p["snapshot"])
     return {
         **p,
+        "jour": p.get("jour") or format_trend_jour_fr(snap),
+        "heure": p.get("heure") or format_trend_heure(snap),
         "score_label": score_trend_label(score),
         "source_label": "historique manuel" if p.get("backfill") else "Gemini",
-        "date_display": format_trend_datetime(str(p["snapshot"])),
+        "date_display": format_trend_datetime(snap),
         "note": str(note).strip() if note else None,
     }
 

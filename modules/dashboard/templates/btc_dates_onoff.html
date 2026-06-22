@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Visio Gemini — Date ON/OFF</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/regime_simulation.js" defer></script>
 </head>
 <body>
   <div class="wrap">
@@ -73,7 +74,22 @@
 
     <section class="panel">
       <h2>États par jour</h2>
-      <p class="btc-regime-days-hint">Clique sur un jour (ligne 00H00) pour voir les 6 créneaux H4.</p>
+      <div class="btc-regime-sim-toolbar btc-regime-sim-toolbar--off" id="regime-sim-toolbar">
+        <label class="backtest-toggle">
+          <input type="checkbox" id="regime-sim-enabled">
+          <span class="backtest-toggle__face">Mode simulation backtest</span>
+        </label>
+        <span class="btc-regime-sim-hint" id="regime-sim-hint">
+          Désactivé — pastilles = données réelles (base SQLite).
+        </span>
+        <button type="button" id="regime-sim-reset" class="backtest-run-btn" hidden>
+          Réinitialiser simulation
+        </button>
+      </div>
+      <p class="btc-regime-days-hint">
+        Clique sur un jour (ligne 00H00) pour voir les 6 créneaux H4.
+        En mode simulation, les pastilles modifiées s'appliquent aussi à Backtest TEMPO, Calendrier et Batterie.
+      </p>
       <div class="btc-regime-days" id="regime-days">
         {% if rows %}
         {% for day, day_rows in rows|groupby('date') %}
@@ -135,7 +151,50 @@
     const daysContainer = document.getElementById("regime-days");
     const showOuiEl = document.getElementById("regime-show-oui");
     const showNonEl = document.getElementById("regime-show-non");
+    const simEnabledEl = document.getElementById("regime-sim-enabled");
+    const simHintEl = document.getElementById("regime-sim-hint");
+    const simResetEl = document.getElementById("regime-sim-reset");
+    const simToolbarEl = document.getElementById("regime-sim-toolbar");
     let allRows = [];
+    let simEnabled = false;
+
+    function updateSimUi() {
+      const n = window.RegimeSim ? RegimeSim.countOverrides() : 0;
+      if (simEnabledEl) simEnabledEl.checked = simEnabled;
+      if (simToolbarEl) {
+        simToolbarEl.classList.toggle("btc-regime-sim-toolbar--off", !simEnabled);
+      }
+      if (simHintEl) {
+        simHintEl.textContent = simEnabled
+          ? (n
+            ? n + " pastille(s) simulée(s) — clique une pastille pour basculer OUI ↔ NON (non enregistré en base)."
+            : "Clique une pastille verte/rouge pour simuler un autre état (backtest TEMPO + Calendrier).")
+          : "Désactivé — pastilles = données réelles (base SQLite).";
+      }
+      if (simResetEl) simResetEl.hidden = n === 0;
+    }
+
+    function rowsForDisplay() {
+      const base = window.RegimeSim ? RegimeSim.applyToRows(allRows) : allRows;
+      return filterRowsForDisplay(base);
+    }
+
+    function renderSlotDot(s) {
+      const clickable = simEnabled ? " btc-regime-slot-dot--clickable" : "";
+      const overridden = s.sim_override ? " btc-regime-slot-dot--sim-override" : "";
+      const title = s.heure + " · " + s.etat + (s.sim_override ? " (simulation)" : "");
+      if (simEnabled) {
+        return (
+          '<button type="button" class="btc-regime-slot-dot btc-regime-slot-dot--' + s.etat_color +
+          clickable + overridden + '" data-day="' + (s.date || "") + '" data-heure="' + (s.heure || "") +
+          '" data-etat="' + s.etat + '" title="' + title + '" aria-label="' + title + '"></button>'
+        );
+      }
+      return (
+        '<span class="btc-regime-slot-dot btc-regime-slot-dot--' + s.etat_color + overridden +
+        '" title="' + title + '"></span>'
+      );
+    }
 
     function logGeminiDiagnostic(data) {
       const raw = data.gemini_raw;
@@ -193,14 +252,12 @@
       const head = dayHeadSlot(slots);
       const nOui = countEtat(slots, "OUI");
       const nNon = countEtat(slots, "NON");
-      const timeline = slots.map(
-        (s) => `<span class="btc-regime-slot-dot btc-regime-slot-dot--${s.etat_color}" title="${s.heure} · ${s.etat}"></span>`
-      ).join("");
+      const timeline = slots.map((s) => renderSlotDot(s)).join("");
       const detailRows = slots.map(
         (s) => `
-          <tr class="btc-regime-row btc-regime-row--${s.etat_color}">
+          <tr class="btc-regime-row btc-regime-row--${s.etat_color}${s.sim_override ? " btc-regime-row--sim" : ""}">
             <td>${s.heure ?? "—"}</td>
-            <td><span class="badge badge-${s.etat_color}">${s.etat}</span></td>
+            <td><span class="badge badge-${s.etat_color}${simEnabled ? " regime-sim-badge" : ""}" data-day="${s.date || day}" data-heure="${s.heure || ""}" data-etat="${s.etat}">${s.etat}${s.sim_override ? " · sim" : ""}</span></td>
           </tr>`
       ).join("");
       return `
@@ -245,24 +302,63 @@
     }
 
     function renderRows(rows) {
-      allRows = rows || [];
-      const visible = filterRowsForDisplay(allRows);
+      if (rows) allRows = rows;
+      const visible = rowsForDisplay();
       if (!visible.length) {
         daysContainer.innerHTML = '<p class="empty btc-regime-days-empty">Aucun créneau correspondant au filtre OUI/NON.</p>';
+        updateSimUi();
         return;
       }
       const byDay = groupRowsByDay(visible);
       daysContainer.innerHTML = [...byDay.entries()]
         .map(([day, slots]) => renderDayDetails(day, slots))
         .join("");
+      updateSimUi();
+    }
+
+    function onSlotToggle(day, heure, etat) {
+      if (!window.RegimeSim || !simEnabled) return;
+      RegimeSim.toggleSlot(day, heure, etat);
+      renderRows();
     }
 
     function onDisplayFilterChange() {
-      renderRows(allRows);
+      renderRows();
     }
 
     showOuiEl?.addEventListener("change", onDisplayFilterChange);
     showNonEl?.addEventListener("change", onDisplayFilterChange);
+
+    daysContainer?.addEventListener("click", (ev) => {
+      const dot = ev.target.closest(".btc-regime-slot-dot--clickable");
+      const badge = ev.target.closest(".regime-sim-badge");
+      const el = dot || badge;
+      if (!el || !simEnabled) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      onSlotToggle(el.dataset.day, el.dataset.heure, el.dataset.etat);
+      if (window.RegimeSim) RegimeSim.refreshBanner();
+    });
+
+    simEnabledEl?.addEventListener("change", () => {
+      simEnabled = !!simEnabledEl.checked;
+      if (window.RegimeSim) RegimeSim.setEnabled(simEnabled);
+      renderRows();
+    });
+
+    simResetEl?.addEventListener("click", () => {
+      if (!window.RegimeSim) return;
+      if (!confirm("Effacer toutes les pastilles simulées ? (la base réelle n'est pas modifiée)")) return;
+      RegimeSim.clearOverrides();
+      renderRows();
+      if (window.RegimeSim) RegimeSim.refreshBanner();
+    });
+
+    (function initSimMode() {
+      if (!window.RegimeSim) return;
+      simEnabled = RegimeSim.isEnabled();
+      updateSimUi();
+    })();
 
     (function initRegimeRows() {
       const el = document.getElementById("regime-rows-json");

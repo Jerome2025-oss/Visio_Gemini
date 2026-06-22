@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Visio Gemini — Backtest TEMPOREL</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/regime_simulation.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -13,6 +14,8 @@
     {% set page_subtitle = "Simulation batch · plage datetime continue · API bitunix simulate_one" %}
     {% set nav_active = "backtest-tempo" %}
     {% include "_dash_nav.html" %}
+
+    <p id="regime-sim-banner" class="regime-sim-banner" hidden></p>
 
     <section class="panel backtest-tempo-panel">
       <h2 class="backtest-tempo-panel__title">Filtre temporel</h2>
@@ -90,6 +93,21 @@
             <span class="backtest-toggle__face">🔴 NON</span>
           </label>
         </div>
+        <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="Tendance BTC H4">
+          <span class="backtest-filtre-label">Tendance H4</span>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="filtre-trend-10"{% if trend_10 %} checked{% endif %}>
+            <span class="backtest-toggle__face">🟢 10</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="filtre-trend-5"{% if trend_5 %} checked{% endif %}>
+            <span class="backtest-toggle__face">🟡 5</span>
+          </label>
+          <label class="backtest-toggle">
+            <input type="checkbox" id="filtre-trend-0"{% if trend_0 %} checked{% endif %}>
+            <span class="backtest-toggle__face">🔴 0</span>
+          </label>
+        </div>
         <div class="backtest-filtre backtest-filtre--etat" role="group" aria-label="État BTC flash">
           <span class="backtest-filtre-label">Voyant BTC</span>
           <label class="backtest-toggle">
@@ -122,6 +140,7 @@
         Résultats remplis après simulation · intervalle continu (pas de coupure horaire par jour)
       </p>
       <div class="backtest-table-wrap">
+        {% set show_regime_col = regime_oui or regime_non %}
         <table class="backtest-table" id="bt-table">
           <thead>
             <tr>
@@ -129,7 +148,8 @@
               <th>Date signal</th>
               <th>Score IA</th>
               <th>Voyant BTC</th>
-              <th>BTC ON/OFF</th>
+              {% if show_regime_col %}<th>BTC ON/OFF</th>{% endif %}
+              <th>Tendance H4</th>
               <th>BTC score</th>
               <th>Résultat</th>
               <th>Durée</th>
@@ -144,7 +164,10 @@
               <td>{{ f.flash_ts or '—' }}</td>
               <td>{% if f.score_display %}{{ f.score_display }}/10{% else %}—{% endif %}</td>
               <td>{{ f.btc_etat_voyant or '—' }}</td>
+              {% if show_regime_col %}
               <td>{% if f.regime_onoff %}<span class="badge badge-{{ 'green' if f.regime_onoff == 'OUI' else 'red' if f.regime_onoff == 'NON' else 'yellow' }}">{{ f.regime_onoff }}</span>{% else %}—{% endif %}</td>
+              {% endif %}
+              <td class="bt-trend-h4">{% if f.trend_h4_score is not none %}<span class="badge badge-{{ f.trend_h4_badge }}">{{ f.trend_h4_score }}</span>{% else %}—{% endif %}</td>
               <td>{% if f.btc_score is not none %}<span class="badge badge-{{ f.btc_badge }}">{{ f.btc_score }}/10</span>{% else %}—{% endif %}</td>
               <td class="bt-result"><span class="badge badge-muted">—</span></td>
               <td class="bt-duree">—</td>
@@ -152,7 +175,7 @@
               <td class="bt-tp-optimal">—</td>
             </tr>
             {% else %}
-            <tr><td colspan="10" class="empty">Aucun signal dans cette sélection temporelle.</td></tr>
+            <tr><td colspan="{{ 11 if show_regime_col else 10 }}" class="empty">Aucun signal dans cette sélection temporelle.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -177,10 +200,12 @@
   <script src="/static/backtest_table.js" defer></script>
   <script src="/static/backtest_chart.js" defer></script>
   <script id="bt-flashes" type="application/json">{{ flashes | tojson }}</script>
+  <script id="bt-boot" type="application/json">{{ {"filtres": filtres, "project_min_date": project_min_date} | tojson }}</script>
   <script>
-    let currentFiltres = {{ filtres | tojson }};
+    const btBoot = JSON.parse(document.getElementById("bt-boot").textContent);
+    let currentFiltres = btBoot.filtres;
     /** Début projet Visio Gemini — ne pas modifier sans accord. */
-    const PROJECT_MIN_DATE = {{ project_min_date | tojson }};
+    const PROJECT_MIN_DATE = btBoot.project_min_date;
 
     const RESULT_BADGE = {
       TP:       { label: "🟢 TP",       cls: "green" },
@@ -360,7 +385,7 @@
     }
 
     function buildRunBody() {
-      return {
+      const body = {
         leverage: parseFloat(document.getElementById("bt-leverage").value),
         tp: parseFloat(document.getElementById("bt-tp").value),
         sl: parseFloat(document.getElementById("bt-sl").value),
@@ -368,6 +393,8 @@
         ...getActiveEtats(),
         ...getTemporalParams(),
       };
+      if (window.RegimeSim) RegimeSim.appendToBody(body);
+      return body;
     }
 
     function setLiveRefreshHint(text, visible) {
@@ -484,6 +511,9 @@
         btc_faible: document.getElementById("filtre-btc-faible").checked,
         regime_oui: document.getElementById("filtre-regime-oui").checked,
         regime_non: document.getElementById("filtre-regime-non").checked,
+        trend_10: document.getElementById("filtre-trend-10").checked,
+        trend_5: document.getElementById("filtre-trend-5").checked,
+        trend_0: document.getElementById("filtre-trend-0").checked,
       };
     }
 
@@ -500,6 +530,10 @@
       params.set("btc_faible", etats.btc_faible ? "true" : "false");
       params.set("regime_oui", etats.regime_oui ? "true" : "false");
       params.set("regime_non", etats.regime_non ? "true" : "false");
+      params.set("trend_10", etats.trend_10 ? "true" : "false");
+      params.set("trend_5", etats.trend_5 ? "true" : "false");
+      params.set("trend_0", etats.trend_0 ? "true" : "false");
+      if (window.RegimeSim) RegimeSim.appendToUrlSearchParams(params);
       appendTemporalParams(params);
       filtres.forEach((f) => params.append("filtres", f));
       window.location.href = "/backtest/tempo?" + params.toString();
@@ -531,6 +565,9 @@
     document.getElementById("filtre-btc-faible").addEventListener("change", reloadWithFiltres);
     document.getElementById("filtre-regime-oui").addEventListener("change", reloadWithFiltres);
     document.getElementById("filtre-regime-non").addEventListener("change", reloadWithFiltres);
+    document.getElementById("filtre-trend-10").addEventListener("change", reloadWithFiltres);
+    document.getElementById("filtre-trend-5").addEventListener("change", reloadWithFiltres);
+    document.getElementById("filtre-trend-0").addEventListener("change", reloadWithFiltres);
 
     document.querySelectorAll("[data-date-preset]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -575,6 +612,10 @@
       params.set("btc_faible", etats.btc_faible ? "true" : "false");
       params.set("regime_oui", etats.regime_oui ? "true" : "false");
       params.set("regime_non", etats.regime_non ? "true" : "false");
+      params.set("trend_10", etats.trend_10 ? "true" : "false");
+      params.set("trend_5", etats.trend_5 ? "true" : "false");
+      params.set("trend_0", etats.trend_0 ? "true" : "false");
+      if (window.RegimeSim) RegimeSim.appendToUrlSearchParams(params);
       appendTemporalParams(params);
       getActiveFiltres().forEach((f) => params.append("filtres", f));
       return "/backtest/tempo/export.csv?" + params.toString();

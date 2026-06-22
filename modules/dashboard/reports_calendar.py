@@ -15,12 +15,16 @@ from modules.dashboard.backtest_temporal import (
     BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
     BACKTEST_TEMPO_DEFAULT_SL,
     BACKTEST_TEMPO_DEFAULT_TP,
+    BACKTEST_TEMPO_DEFAULT_TREND_0,
+    BACKTEST_TEMPO_DEFAULT_TREND_5,
+    BACKTEST_TEMPO_DEFAULT_TREND_10,
     VISIO_PROJECT_MIN_DATE,
     VISIO_PROJECT_MIN_DATE_STR,
     _utc_today,
     resolve_temporal_filter,
 )
 from modules.dashboard.btc_regime_filter import normalize_regime_etats
+from modules.dashboard.btc_trend_filter import normalize_trend_scores
 from modules.triggers import db_manager
 
 CALENDAR_MIN_DATE = VISIO_PROJECT_MIN_DATE
@@ -88,6 +92,8 @@ def _row_to_calendar_trade(row: dict[str, Any]) -> dict[str, Any]:
         "pnl_realise": float(pnl_realise) if pnl_realise is not None else None,
         "exit_reason": _calendar_exit_reason(row),
         "pnl_provisional": bool(row.get("provisional")),
+        "trend_h4_score": row.get("trend_h4_score"),
+        "trend_h4_badge": row.get("trend_h4_badge"),
     }
 
 
@@ -111,7 +117,7 @@ def _aggregate_days(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     days: list[dict[str, Any]] = []
     for day_key in sorted(by_day.keys()):
-        trades = by_day[day_key]
+        trades = sorted(by_day[day_key], key=lambda t: t.get("entry_ts") or "")
         trade_rows = [t for t in trades if t["exit_reason"] in ("TP", "SL", "OPEN", "TIMEOUT")]
         pnl_realise = round(
             sum(t["pnl_realise"] for t in trades if t["pnl_realise"] is not None),
@@ -183,6 +189,10 @@ def build_calendar_data(
     btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE,
     regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
     regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON,
+    trend_10: bool = BACKTEST_TEMPO_DEFAULT_TREND_10,
+    trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5,
+    trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0,
+    regime_overrides: dict[tuple[str, str], str] | None = None,
 ) -> dict[str, Any]:
     """Simule les flashs filtrés et agrège le calendrier journalier."""
     from modules.dashboard.routes import (
@@ -207,6 +217,11 @@ def build_calendar_data(
         regime_oui=regime_oui,
         regime_non=regime_non,
     )
+    trend_scores = normalize_trend_scores(
+        trend_10=trend_10,
+        trend_5=trend_5,
+        trend_0=trend_0,
+    )
     temporal = resolve_temporal_filter(
         date_debut=effective_from,
         date_fin=effective_to,
@@ -222,6 +237,8 @@ def build_calendar_data(
             etats=etats,
             temporal=temporal,
             regime_etats=regime_etats,
+            regime_overrides=regime_overrides,
+            trend_scores=trend_scores,
         )
     finally:
         conn.close()
@@ -252,6 +269,7 @@ def build_calendar_data(
         "n_signaux": len(sim_rows),
         "date_from": temporal.date_debut.isoformat(),
         "date_to": temporal.date_fin.isoformat(),
+        "regime_overrides_applied": len(regime_overrides or {}),
         "stats": stats,
         "data": {"days": days},
     }

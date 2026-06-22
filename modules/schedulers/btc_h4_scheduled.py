@@ -1,4 +1,4 @@
-"""Scan BTC H4 planifié — script oneshot pour systemd timer.
+"""Scan BTC H4 planifié — script oneshot pour systemd timer (6×/jour, clôtures H4 UTC).
 
 Usage standalone :
     python -m modules.schedulers.btc_h4_scheduled

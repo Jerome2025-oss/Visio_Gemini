@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Visio Gemini — Batterie Backtest</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/regime_simulation.js" defer></script>
 </head>
 <body>
   <div class="wrap">
@@ -12,6 +13,8 @@
     {% set page_subtitle = "21 scénarios · BTC ON/OFF × voyants · simulation batch bitunix" %}
     {% set nav_active = "backtest-battery" %}
     {% include "_dash_nav.html" %}
+
+    <p id="regime-sim-banner" class="regime-sim-banner" hidden></p>
 
     <section class="panel backtest-tempo-panel">
       <h2 class="backtest-tempo-panel__title">Paramètres</h2>
@@ -240,19 +243,21 @@
       spin.hidden = false;
       spin.textContent = "simulation en cours (plusieurs minutes)…";
       try {
+        const body = {
+          date_debut: document.getElementById("bat-date-debut").value,
+          date_fin: document.getElementById("bat-date-fin").value,
+          heure_debut: document.getElementById("bat-heure-debut").value || "00:00",
+          heure_fin: document.getElementById("bat-heure-fin").value || "23:59",
+          leverage: parseFloat(document.getElementById("bat-leverage").value),
+          tp: parseFloat(document.getElementById("bat-tp").value),
+          sl: parseFloat(document.getElementById("bat-sl").value),
+          export_files: document.getElementById("bat-export-files").checked,
+        };
+        if (window.RegimeSim) RegimeSim.appendToBody(body);
         const resp = await fetch("/backtest/battery/run", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({
-            date_debut: document.getElementById("bat-date-debut").value,
-            date_fin: document.getElementById("bat-date-fin").value,
-            heure_debut: document.getElementById("bat-heure-debut").value || "00:00",
-            heure_fin: document.getElementById("bat-heure-fin").value || "23:59",
-            leverage: parseFloat(document.getElementById("bat-leverage").value),
-            tp: parseFloat(document.getElementById("bat-tp").value),
-            sl: parseFloat(document.getElementById("bat-sl").value),
-            export_files: document.getElementById("bat-export-files").checked,
-          }),
+          body: JSON.stringify(body),
         });
         const data = await resp.json();
         if (!resp.ok || !data.ok) {

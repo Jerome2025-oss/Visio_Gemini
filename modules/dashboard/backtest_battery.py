@@ -52,6 +52,7 @@ class BatteryConfig:
     leverage: float = 30.0
     tp: float = 1.4
     sl: float = 2.0
+    regime_overrides: dict[tuple[str, str], str] | None = None
 
 
 ProgressFn = Callable[[int, int], None]
@@ -250,6 +251,7 @@ def run_battery(
             filtres=[],
             etats=_normalize_backtest_etats(),
             regime_etats=None,
+            regime_overrides=config.regime_overrides,
         )
     finally:
         conn.close()
