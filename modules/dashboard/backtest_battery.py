@@ -1,4 +1,4 @@
-"""Batterie backtest TEMPO — synthèse multi-scénarios (voyants BTC)."""
+"""Batterie backtest TEMPO — synthèse multi-scénarios (voyants + tendance BTC H4)."""
 
 from __future__ import annotations
 
@@ -34,6 +34,17 @@ VOYANT_LABELS: dict[frozenset[str], str] = {
         }
     ): "Tous voyants",
 }
+
+TREND_LABELS: dict[frozenset[int], str] = {
+    frozenset({10}): "🟢 10 seul",
+    frozenset({5}): "🟡 5 seul",
+    frozenset({0}): "🔴 0 seul",
+    frozenset({10, 5}): "🟢 10 + 🟡 5",
+    frozenset({10, 0}): "🟢 10 + 🔴 0",
+    frozenset({5, 0}): "🟡 5 + 🔴 0",
+    frozenset({10, 5, 0}): "Toutes tendances",
+}
+
 
 @dataclass(frozen=True)
 class BatteryConfig:
@@ -80,61 +91,53 @@ def _simulate_all(
             )
             row = _backtest_row_from_sim(flash, payload)
         row["btc_score"] = flash.get("btc_score")
+        row["trend_h4_score"] = flash.get("trend_h4_score")
+        row["trend_h4_badge"] = flash.get("trend_h4_badge")
         rows.append(row)
         if on_progress:
             on_progress(i, n)
     return rows
 
 
-def _filter_rows(
+def _filter_rows_combined(
     rows: list[dict[str, Any]],
     *,
     etats: frozenset[str],
+    scores: frozenset[int],
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for r in rows:
         if r.get("btc_etat") not in etats:
             continue
-        out.append(r)
+        score = r.get("trend_h4_score")
+        if score is None:
+            continue
+        if int(score) in scores:
+            out.append(r)
     return out
 
 
-def _scenario_row(
+def _scenario_matrix_row(
     *,
     voyant_label: str,
     voyant_key: frozenset[str],
+    trend_label: str,
+    trend_key: frozenset[int],
     all_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     from modules.dashboard.routes import _compute_backtest_stats
 
-    subset = _filter_rows(all_rows, etats=voyant_key)
+    subset = _filter_rows_combined(all_rows, etats=voyant_key, scores=trend_key)
     stats = _compute_backtest_stats(subset)
     return {
+        "dimension": "matrix",
+        "label": f"{trend_label} × {voyant_label}",
         "voyant_label": voyant_label,
+        "trend_label": trend_label,
         "voyant_filter": sorted(voyant_key),
+        "trend_filter": sorted(trend_key),
         "stats": stats,
     }
-
-
-def _tous_voyants() -> frozenset[str]:
-    return frozenset(
-        {
-            db_manager.BTC_ETAT_OK,
-            db_manager.BTC_ETAT_REPRISE,
-            db_manager.BTC_ETAT_FAIBLE,
-        }
-    )
-
-
-def _pnl_raw(row: dict[str, Any]) -> float | None:
-    raw = row.get("_pnl_all")
-    if raw is None:
-        raw = row.get("_pnl_raw")
-    return float(raw) if raw is not None else None
-
-
-def _format_pnl_sum(pnl_sum: float) -> str:
-    return f"{pnl_sum:+.2f}%"
 
 
 def run_battery(
@@ -142,7 +145,7 @@ def run_battery(
     *,
     on_progress: ProgressFn | None = None,
 ) -> dict[str, Any]:
-    """Simule tous les flashs de la période puis agrège des scénarios par voyant BTC."""
+    """Simule tous les flashs puis agrège scénarios voyant × tendance H4 (49 combinaisons)."""
     from modules.dashboard.routes import (
         _fetch_backtest_flashes,
         _normalize_backtest_etats,
@@ -174,15 +177,18 @@ def run_battery(
         on_progress=on_progress,
     )
 
-    scenarios: list[dict[str, Any]] = []
-    for voyant_key, voyant_label in VOYANT_LABELS.items():
-        scenarios.append(
-            _scenario_row(
-                voyant_label=voyant_label,
-                voyant_key=voyant_key,
-                all_rows=all_rows,
+    scenarios_matrix: list[dict[str, Any]] = []
+    for trend_key, trend_label in TREND_LABELS.items():
+        for voyant_key, voyant_label in VOYANT_LABELS.items():
+            scenarios_matrix.append(
+                _scenario_matrix_row(
+                    voyant_label=voyant_label,
+                    voyant_key=voyant_key,
+                    trend_label=trend_label,
+                    trend_key=trend_key,
+                    all_rows=all_rows,
+                )
             )
-        )
 
     return {
         "ok": True,
@@ -199,7 +205,10 @@ def run_battery(
         },
         "period_summary": temporal_period_summary(temporal, len(all_rows)),
         "interval_label": temporal_interval_label(temporal),
-        "scenarios": scenarios,
+        "scenarios_matrix": scenarios_matrix,
+        "n_scenarios": len(scenarios_matrix),
+        # Rétrocompat : alias principal.
+        "scenarios": scenarios_matrix,
     }
 
 
@@ -213,7 +222,7 @@ def export_battery_files(
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = stamp or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     params = payload["params"]
-    scenarios = payload["scenarios"]
+    scenarios_matrix = payload.get("scenarios_matrix") or payload.get("scenarios") or []
 
     json_path = out_dir / f"battery_{stamp}.json"
     csv_path = out_dir / f"battery_{stamp}.csv"
@@ -225,6 +234,7 @@ def export_battery_files(
     )
 
     fieldnames = [
+        "tendance_h4",
         "voyant",
         "n",
         "tp",
@@ -238,11 +248,12 @@ def export_battery_files(
     with csv_path.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
-        for s in scenarios:
+        for s in scenarios_matrix:
             st = s["stats"]
             w.writerow(
                 {
-                    "voyant": s["voyant_label"],
+                    "tendance_h4": s.get("trend_label"),
+                    "voyant": s.get("voyant_label"),
                     "n": st["total"],
                     "tp": st["tp"],
                     "sl": st["sl"],
@@ -259,14 +270,19 @@ def export_battery_files(
         "",
         f"- **Levier** {params['leverage']} · **TP** {params['tp']}% · **SL** {params['sl']}%",
         f"- **Flashs simulés** {params['n_flashes_total']}",
+        f"- **Scénarios** {len(scenarios_matrix)} (tendance H4 × voyant)",
         "",
-        "| Voyant | N | TP | SL | WR | PnL total |",
-        "|--------|---:|---:|---:|---:|----------:|",
+        "| Tendance H4 | Voyant | N | TP | SL | WR | PnL total |",
+        "|-------------|--------|---:|---:|---:|---:|----------:|",
     ]
-    for s in scenarios:
+    current_trend = None
+    for s in scenarios_matrix:
+        trend = s.get("trend_label") or ""
+        if trend != current_trend:
+            current_trend = trend
         st = s["stats"]
         lines.append(
-            f"| {s['voyant_label']} | {st['total']} | {st['tp']} | {st['sl']} | {st['wr']} | {st['pnl_total']} |"
+            f"| {s.get('trend_label')} | {s.get('voyant_label')} | {st['total']} | {st['tp']} | {st['sl']} | {st['wr']} | {st['pnl_total']} |"
         )
     md_path.write_text("\n".join(lines), encoding="utf-8")
 

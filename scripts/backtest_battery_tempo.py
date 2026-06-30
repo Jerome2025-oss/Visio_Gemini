@@ -57,7 +57,7 @@ def main() -> None:
     print("Simulation API bitunix…")
     payload = run_battery(config, on_progress=on_progress)
     n = payload["params"]["n_flashes_total"]
-    print(f"Terminé — {n} flash(s) · {len(payload['scenarios'])} scénarios")
+    print(f"Terminé — {n} flash(s) · {len(payload.get('scenarios_matrix') or payload['scenarios'])} scénarios")
 
     if args.export:
         paths = export_battery_files(payload, ROOT / "data" / "backtest_battery")

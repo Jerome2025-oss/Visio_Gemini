@@ -1116,6 +1116,7 @@ def _compute_backtest_stats(resultats: list[dict[str, Any]]) -> dict[str, Any]:
         )
         if pnl_total_sum is not None
         else "—",
+        "pnl_total_raw": pnl_total_sum,
         "par_etat": par_etat,
     }
 
@@ -1521,7 +1522,7 @@ def backtest_battery_page(
     tp: float = 1.4,
     sl: float = 2.0,
 ) -> HTMLResponse:
-    """Batterie de test — scénarios voyants BTC."""
+    """Batterie de test — matrice tendance BTC H4 × voyants flash (49 scénarios)."""
     temporal = resolve_temporal_filter(
         date_debut=date_debut,
         date_fin=date_fin,
@@ -1548,7 +1549,7 @@ def backtest_battery_page(
 
 @router.post("/backtest/battery/run")
 def backtest_battery_run(body: BacktestBatteryRunRequest) -> JSONResponse:
-    """Lance la batterie (21 scénarios) — peut prendre plusieurs minutes."""
+    """Lance la batterie (49 scénarios : 7 tendances H4 × 7 voyants) — peut prendre plusieurs minutes."""
     config = BatteryConfig(
         date_debut=body.date_debut,
         date_fin=body.date_fin,

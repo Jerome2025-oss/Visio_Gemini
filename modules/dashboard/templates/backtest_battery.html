@@ -9,7 +9,7 @@
 <body>
   <div class="wrap">
     {% set page_title = "Batterie Backtest" %}
-    {% set page_subtitle = "Scénarios voyants BTC · simulation batch bitunix" %}
+    {% set page_subtitle = "Matrice tendance BTC H4 × voyants flash · 49 scénarios · simulation batch bitunix" %}
     {% set nav_active = "backtest-battery" %}
     {% include "_dash_nav.html" %}
 
@@ -50,21 +50,49 @@
       </div>
       <p class="backtest-tempo-interval" id="bat-interval-label">{{ interval_label }}</p>
       <p class="funnel-card__meta battery-hint">
-        Scénarios basés sur les voyants 🟢/✅/🔴 (état BTC des flashs).
+        Matrice 7×7 : chaque ligne croise une combinaison Tendance H4 🟢/🟡/🔴 (10/5/0) avec un filtre voyant 🟢/✅/🔴.
       </p>
     </section>
 
     <section class="panel" id="bat-summary-panel" hidden>
       <p class="funnel-card__meta" id="bat-period-summary"></p>
-      <div class="backtest-stats" id="bat-baseline-stats"></div>
+      <div class="backtest-stats battery-baseline-stats" id="bat-baseline-matrix"></div>
     </section>
 
     <section class="panel" id="bat-results-panel" hidden>
-      <h2>Tableau synthèse — scénarios</h2>
+      <h2>Tableau synthèse — tendance H4 × voyant <span class="funnel-card__meta" id="bat-scenario-count"></span></h2>
+      <div class="battery-filters" id="bat-filters">
+        <div class="battery-filters__row">
+          <div class="battery-filters__group">
+            <span class="battery-filters__label">Filtres (min)</span>
+          </div>
+          <label class="battery-filters__field">N
+            <input type="number" id="bat-filter-n-min" min="0" step="1" placeholder="0">
+          </label>
+          <label class="battery-filters__field">TP
+            <input type="number" id="bat-filter-tp-min" min="0" step="1" placeholder="0">
+          </label>
+          <label class="battery-filters__field">SL
+            <input type="number" id="bat-filter-sl-min" min="0" step="1" placeholder="0">
+          </label>
+          <label class="battery-filters__field">WR %
+            <input type="number" id="bat-filter-wr-min" min="0" max="100" step="0.1" placeholder="0">
+          </label>
+          <label class="battery-filters__field">PnL %
+            <input type="text" id="bat-filter-pnl" inputmode="decimal" placeholder="ex. -20" autocomplete="off">
+          </label>
+          <button type="button" class="battery-filters__reset" id="bat-filters-reset">Réinitialiser</button>
+        </div>
+        <p class="funnel-card__meta battery-filters__hint">
+          PnL négatif (ex. <code>-20</code>) → scénarios avec PnL ≤ -20 % uniquement.
+          PnL positif (ex. <code>+50</code>) → scénarios avec PnL ≥ +50 %.
+        </p>
+      </div>
       <div class="backtest-table-wrap">
-        <table class="backtest-table battery-table" id="bat-table">
+        <table class="backtest-table battery-table" id="bat-table-matrix">
           <thead>
             <tr>
+              <th>Tendance H4</th>
               <th>Voyant</th>
               <th>N</th>
               <th>TP</th>
@@ -73,7 +101,7 @@
               <th>PnL total</th>
             </tr>
           </thead>
-          <tbody id="bat-tbody"></tbody>
+          <tbody id="bat-tbody-matrix"></tbody>
         </table>
       </div>
     </section>
@@ -91,24 +119,116 @@
       return String(val).startsWith("~") ? `${base} pnl-live` : base;
     }
 
-    function renderBaseline(scenarios) {
-      const ref = scenarios.find((s) => s.voyant_label === "Tous voyants");
-      if (!ref) return;
-      const st = ref.stats;
-      document.getElementById("bat-baseline-stats").innerHTML = `
+    function renderBaselinePill(label, st, containerId) {
+      const el = document.getElementById(containerId);
+      if (!el || !st) return;
+      el.innerHTML = `
         <div class="bt-stat-pill">
-          <span class="bt-stat-pill__label">Référence (tous voyants)</span>
+          <span class="bt-stat-pill__label">${label}</span>
           <span class="bt-stat-pill__value">${st.trades != null ? st.trades : st.total} trades · ${st.tp} TP · ${st.sl} SL · WR ${st.wr} · PnL ${st.pnl_total}</span>
         </div>`;
     }
 
-    function renderTable(scenarios) {
-      const tbody = document.getElementById("bat-tbody");
+    function renderBaselineMatrix(scenarios) {
+      const ref = scenarios.find(
+        (s) => s.voyant_label === "Tous voyants" && s.trend_label === "Toutes tendances"
+      );
+      renderBaselinePill("Référence (toutes tendances × tous voyants)", ref?.stats, "bat-baseline-matrix");
+    }
+
+    function matrixRowClass(s) {
+      const scores = s.trend_filter || [];
+      if (scores.length === 1 && scores[0] === 10) return "battery-row--trend-10";
+      if (scores.length === 1 && scores[0] === 5) return "battery-row--trend-5";
+      if (scores.length === 1 && scores[0] === 0) return "battery-row--trend-0";
+      return "";
+    }
+
+    function _toNumber(val) {
+      if (val == null) return null;
+      if (typeof val === "number") return isNaN(val) ? null : val;
+      let raw = String(val).trim();
+      if (!raw || raw === "—" || raw === "-" || raw === "+") return null;
+      raw = raw
+        .replace(/~/g, "")
+        .replace(/%/g, "")
+        .replace(/\u2212/g, "-")
+        .replace(/\s/g, "")
+        .replace(",", ".");
+      const num = parseFloat(raw);
+      return isNaN(num) ? null : num;
+    }
+
+    function _readFilterNumber(el) {
+      if (!el) return null;
+      const raw = String(el.value ?? "").trim();
+      if (!raw || raw === "-" || raw === "+" || raw === "." || raw === ",") return null;
+      return _toNumber(raw);
+    }
+
+    function _toInt(val) {
+      const num = _toNumber(val);
+      if (num == null) return null;
+      const i = parseInt(String(num), 10);
+      return isNaN(i) ? null : i;
+    }
+
+    function getBatteryFilters() {
+      const nMin = _readFilterNumber(document.getElementById("bat-filter-n-min"));
+      const tpMin = _readFilterNumber(document.getElementById("bat-filter-tp-min"));
+      const slMin = _readFilterNumber(document.getElementById("bat-filter-sl-min"));
+      const wrMin = _readFilterNumber(document.getElementById("bat-filter-wr-min"));
+      const pnlThreshold = _readFilterNumber(document.getElementById("bat-filter-pnl"));
+      return { nMin, tpMin, slMin, wrMin, pnlThreshold };
+    }
+
+    function _passesPnlFilter(pnl, threshold) {
+      if (threshold == null) return true;
+      if (pnl == null) return false;
+      if (threshold < 0) return pnl <= threshold;
+      if (threshold > 0) return pnl >= threshold;
+      return pnl <= 0;
+    }
+
+    function _statNumber(st, key, formattedKey) {
+      if (st[key] != null && st[key] !== "") return _toNumber(st[key]);
+      return _toNumber(st[formattedKey]);
+    }
+
+    function applyBatteryFilters(matrix) {
+      const f = getBatteryFilters();
+      return (matrix || []).filter((s) => {
+        const st = s.stats || {};
+        const n = _toInt(st.trades != null ? st.trades : st.total);
+        const tp = _toInt(st.tp);
+        const sl = _toInt(st.sl);
+        const wr = _toNumber(st.wr);
+        const pnl = _statNumber(st, "pnl_total_raw", "pnl_total");
+        if (f.nMin != null && (n == null || n < f.nMin)) return false;
+        if (f.tpMin != null && (tp == null || tp < f.tpMin)) return false;
+        if (f.slMin != null && (sl == null || sl < f.slMin)) return false;
+        if (f.wrMin != null && (wr == null || wr < f.wrMin)) return false;
+        if (!_passesPnlFilter(pnl, f.pnlThreshold)) return false;
+        return true;
+      });
+    }
+
+    function renderMatrixTable(scenarios) {
+      const tbody = document.getElementById("bat-tbody-matrix");
+      if (!tbody) return;
+      let prevTrend = null;
       tbody.innerHTML = scenarios.map((s) => {
         const st = s.stats;
         const pnlCls = pnlClass(st.pnl_total);
+        const rowCls = matrixRowClass(s);
+        const groupCls = s.trend_label !== prevTrend ? "battery-matrix-group-start" : "";
+        prevTrend = s.trend_label;
+        const trendCell = groupCls
+          ? `<td class="battery-matrix-trend"><strong>${s.trend_label}</strong></td>`
+          : `<td class="battery-matrix-trend"></td>`;
         return `
-          <tr>
+          <tr class="${rowCls} ${groupCls}">
+            ${trendCell}
             <td>${s.voyant_label}</td>
             <td>${st.trades != null ? st.trades : st.total}</td>
             <td>${st.tp}</td>
@@ -117,6 +237,8 @@
             <td class="${pnlCls}">${st.pnl_total}</td>
           </tr>`;
       }).join("");
+      const countEl = document.getElementById("bat-scenario-count");
+      if (countEl) countEl.textContent = `(${scenarios.length} scénarios)`;
     }
 
     function renderOutcomeTable(bilan, elId, emptyMsg, countLabel) {
@@ -195,11 +317,44 @@
       if (data.interval_label) {
         document.getElementById("bat-interval-label").textContent = data.interval_label;
       }
-      renderBaseline(data.scenarios || []);
-      renderTable(data.scenarios || []);
+      const matrix = data.scenarios_matrix || data.scenarios || [];
+      renderBaselineMatrix(matrix);
+      window.__batteryMatrix = matrix;
+      renderMatrixTable(applyBatteryFilters(matrix));
       document.getElementById("bat-summary-panel").hidden = false;
       document.getElementById("bat-results-panel").hidden = false;
     }
+
+    function wireBatteryFilters() {
+      const ids = [
+        "bat-filter-n-min",
+        "bat-filter-tp-min",
+        "bat-filter-sl-min",
+        "bat-filter-wr-min",
+        "bat-filter-pnl",
+      ];
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("input", () => {
+          const matrix = window.__batteryMatrix || [];
+          renderMatrixTable(applyBatteryFilters(matrix));
+        });
+      });
+      const reset = document.getElementById("bat-filters-reset");
+      if (reset) {
+        reset.addEventListener("click", () => {
+          ids.forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.value = "";
+          });
+          const matrix = window.__batteryMatrix || [];
+          renderMatrixTable(applyBatteryFilters(matrix));
+        });
+      }
+    }
+
+    wireBatteryFilters();
 
     document.getElementById("bat-run").addEventListener("click", async () => {
       const btn = document.getElementById("bat-run");
