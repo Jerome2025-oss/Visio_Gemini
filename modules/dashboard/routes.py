@@ -1683,12 +1683,9 @@ def reports_calendar_data(
     btc_ok: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_OK),
     btc_reprise: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_REPRISE),
     btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
-    regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
-    regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
     trend_10: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_10),
     trend_5: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_5),
     trend_0: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_0),
-    regime_overrides: str | None = None,
 ) -> JSONResponse:
     """Calendrier PnL local (flashs Visio Gemini depuis le 14/06/2026)."""
     return _reports_calendar_data_response(
@@ -1701,18 +1698,16 @@ def reports_calendar_data(
         btc_ok=btc_ok,
         btc_reprise=btc_reprise,
         btc_faible=btc_faible,
-        regime_oui=regime_oui,
-        regime_non=regime_non,
         trend_10=trend_10,
         trend_5=trend_5,
         trend_0=trend_0,
-        regime_overrides=_coerce_regime_overrides(regime_overrides),
+        regime_overrides=None,
     )
 
 
 @router.post("/reports/calendar/data")
 def reports_calendar_data_post(body: CalendarDataRequest) -> JSONResponse:
-    """Calendrier PnL — POST recommandé quand des pastilles simulation sont actives."""
+    """Calendrier PnL."""
     return _reports_calendar_data_response(
         leverage=body.leverage,
         tp=body.tp,
@@ -1723,12 +1718,10 @@ def reports_calendar_data_post(body: CalendarDataRequest) -> JSONResponse:
         btc_ok=body.btc_ok,
         btc_reprise=body.btc_reprise,
         btc_faible=body.btc_faible,
-        regime_oui=body.regime_oui,
-        regime_non=body.regime_non,
         trend_10=body.trend_10,
         trend_5=body.trend_5,
         trend_0=body.trend_0,
-        regime_overrides=_coerce_regime_overrides(body.regime_overrides),
+        regime_overrides=None,
     )
 
 
@@ -1740,12 +1733,9 @@ def reports_calendar_preview(
     btc_ok: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_OK),
     btc_reprise: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_REPRISE),
     btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
-    regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
-    regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
     trend_10: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_10),
     trend_5: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_5),
     trend_0: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_0),
-    regime_overrides: str | None = None,
 ) -> JSONResponse:
     """Aperçu calendrier (signaux filtrés par jour, sans simulation PnL)."""
     return _reports_calendar_preview_response(
@@ -1755,18 +1745,16 @@ def reports_calendar_preview(
         btc_ok=btc_ok,
         btc_reprise=btc_reprise,
         btc_faible=btc_faible,
-        regime_oui=regime_oui,
-        regime_non=regime_non,
         trend_10=trend_10,
         trend_5=trend_5,
         trend_0=trend_0,
-        regime_overrides=_coerce_regime_overrides(regime_overrides),
+        regime_overrides=None,
     )
 
 
 @router.post("/reports/calendar/preview")
 def reports_calendar_preview_post(body: CalendarPreviewRequest) -> JSONResponse:
-    """Aperçu calendrier — POST si pastilles simulation actives."""
+    """Aperçu calendrier."""
     return _reports_calendar_preview_response(
         date_from=body.date_from,
         date_to=body.date_to,
@@ -1774,12 +1762,10 @@ def reports_calendar_preview_post(body: CalendarPreviewRequest) -> JSONResponse:
         btc_ok=body.btc_ok,
         btc_reprise=body.btc_reprise,
         btc_faible=body.btc_faible,
-        regime_oui=body.regime_oui,
-        regime_non=body.regime_non,
         trend_10=body.trend_10,
         trend_5=body.trend_5,
         trend_0=body.trend_0,
-        regime_overrides=_coerce_regime_overrides(body.regime_overrides),
+        regime_overrides=None,
     )
 
 
@@ -1794,8 +1780,6 @@ def _reports_calendar_data_response(
     btc_ok: bool,
     btc_reprise: bool,
     btc_faible: bool,
-    regime_oui: bool,
-    regime_non: bool,
     trend_10: bool,
     trend_5: bool,
     trend_0: bool,
@@ -1814,8 +1798,6 @@ def _reports_calendar_data_response(
             btc_ok=btc_ok,
             btc_reprise=btc_reprise,
             btc_faible=btc_faible,
-            regime_oui=regime_oui,
-            regime_non=regime_non,
             trend_10=trend_10,
             trend_5=trend_5,
             trend_0=trend_0,
@@ -1834,8 +1816,6 @@ def _reports_calendar_preview_response(
     btc_ok: bool,
     btc_reprise: bool,
     btc_faible: bool,
-    regime_oui: bool,
-    regime_non: bool,
     trend_10: bool,
     trend_5: bool,
     trend_0: bool,
@@ -1851,8 +1831,6 @@ def _reports_calendar_preview_response(
             btc_ok=btc_ok,
             btc_reprise=btc_reprise,
             btc_faible=btc_faible,
-            regime_oui=regime_oui,
-            regime_non=regime_non,
             trend_10=trend_10,
             trend_5=trend_5,
             trend_0=trend_0,
