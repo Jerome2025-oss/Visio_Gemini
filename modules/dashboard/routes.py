@@ -1236,6 +1236,21 @@ class CalendarDataRequest(BacktestRunRequest):
     date_to: str | None = None
 
 
+class CalendarPreviewRequest(BaseModel):
+    date_from: str | None = None
+    date_to: str | None = None
+    filtres: list[str] = Field(default_factory=list)
+    btc_ok: bool = BACKTEST_TEMPO_DEFAULT_BTC_OK
+    btc_reprise: bool = BACKTEST_TEMPO_DEFAULT_BTC_REPRISE
+    btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE
+    regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI
+    regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON
+    trend_10: bool = BACKTEST_TEMPO_DEFAULT_TREND_10
+    trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5
+    trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0
+    regime_overrides: dict[str, str] | None = None
+
+
 @router.get("/backtest/chart")
 def backtest_chart_data(
     symbol: Annotated[str, Query(min_length=1)],
@@ -1794,6 +1809,57 @@ def reports_calendar_data_post(body: CalendarDataRequest) -> JSONResponse:
     )
 
 
+@router.get("/reports/calendar/preview")
+def reports_calendar_preview(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    filtres: list[str] = Query(default=[]),
+    btc_ok: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_OK),
+    btc_reprise: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_REPRISE),
+    btc_faible: bool = Query(default=BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE),
+    regime_oui: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_OUI),
+    regime_non: bool = Query(default=BACKTEST_TEMPO_DEFAULT_REGIME_NON),
+    trend_10: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_10),
+    trend_5: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_5),
+    trend_0: bool = Query(default=BACKTEST_TEMPO_DEFAULT_TREND_0),
+    regime_overrides: str | None = None,
+) -> JSONResponse:
+    """Aperçu calendrier (signaux filtrés par jour, sans simulation PnL)."""
+    return _reports_calendar_preview_response(
+        date_from=date_from,
+        date_to=date_to,
+        filtres=filtres,
+        btc_ok=btc_ok,
+        btc_reprise=btc_reprise,
+        btc_faible=btc_faible,
+        regime_oui=regime_oui,
+        regime_non=regime_non,
+        trend_10=trend_10,
+        trend_5=trend_5,
+        trend_0=trend_0,
+        regime_overrides=_coerce_regime_overrides(regime_overrides),
+    )
+
+
+@router.post("/reports/calendar/preview")
+def reports_calendar_preview_post(body: CalendarPreviewRequest) -> JSONResponse:
+    """Aperçu calendrier — POST si pastilles simulation actives."""
+    return _reports_calendar_preview_response(
+        date_from=body.date_from,
+        date_to=body.date_to,
+        filtres=body.filtres,
+        btc_ok=body.btc_ok,
+        btc_reprise=body.btc_reprise,
+        btc_faible=body.btc_faible,
+        regime_oui=body.regime_oui,
+        regime_non=body.regime_non,
+        trend_10=body.trend_10,
+        trend_5=body.trend_5,
+        trend_0=body.trend_0,
+        regime_overrides=_coerce_regime_overrides(body.regime_overrides),
+    )
+
+
 def _reports_calendar_data_response(
     *,
     leverage: float,
@@ -1819,6 +1885,43 @@ def _reports_calendar_data_response(
             leverage=leverage,
             tp=tp,
             sl=sl,
+            date_from=date_from,
+            date_to=date_to,
+            filtres=filtres,
+            btc_ok=btc_ok,
+            btc_reprise=btc_reprise,
+            btc_faible=btc_faible,
+            regime_oui=regime_oui,
+            regime_non=regime_non,
+            trend_10=trend_10,
+            trend_5=trend_5,
+            trend_0=trend_0,
+            regime_overrides=regime_overrides,
+        )
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse(payload)
+
+
+def _reports_calendar_preview_response(
+    *,
+    date_from: str | None,
+    date_to: str | None,
+    filtres: list[str],
+    btc_ok: bool,
+    btc_reprise: bool,
+    btc_faible: bool,
+    regime_oui: bool,
+    regime_non: bool,
+    trend_10: bool,
+    trend_5: bool,
+    trend_0: bool,
+    regime_overrides: dict[tuple[str, str], str] | None,
+) -> JSONResponse:
+    from modules.dashboard.reports_calendar import build_calendar_preview
+
+    try:
+        payload = build_calendar_preview(
             date_from=date_from,
             date_to=date_to,
             filtres=filtres,

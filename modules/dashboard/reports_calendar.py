@@ -176,11 +176,41 @@ def _compute_calendar_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build_calendar_data(
+def _aggregate_days_preview(flashes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Agrège les signaux filtrés par jour (sans simulation Bitunix)."""
+    by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for flash in flashes:
+        flash_ts = str(flash.get("flash_ts") or "")
+        day_key = flash_ts[:10] if len(flash_ts) >= 10 else ""
+        if not day_key:
+            continue
+        by_day[day_key].append(
+            {
+                "symbol": flash.get("token") or "",
+                "entry_ts": _entry_ts_iso(flash_ts),
+                "trend_h4_score": flash.get("trend_h4_score"),
+                "trend_h4_badge": flash.get("trend_h4_badge"),
+            }
+        )
+
+    days: list[dict[str, Any]] = []
+    for day_key in sorted(by_day.keys()):
+        trades = sorted(by_day[day_key], key=lambda t: t.get("entry_ts") or "")
+        n = len(trades)
+        days.append(
+            {
+                "date": day_key,
+                "n": n,
+                "n_signaux": n,
+                "preview": True,
+                "trades": trades,
+            }
+        )
+    return days
+
+
+def _fetch_filtered_calendar_flashes(
     *,
-    leverage: float,
-    tp: float,
-    sl: float,
     date_from: str | None = None,
     date_to: str | None = None,
     filtres: list[str] | None = None,
@@ -193,16 +223,12 @@ def build_calendar_data(
     trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5,
     trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0,
     regime_overrides: dict[tuple[str, str], str] | None = None,
-) -> dict[str, Any]:
-    """Simule les flashs filtrés et agrège le calendrier journalier."""
+) -> tuple[Any, list[dict[str, Any]]]:
     from modules.dashboard.routes import (
-        _backtest_row_from_sim,
-        _call_simulate_one,
         _fetch_backtest_flashes_temporal,
         _include_flash_in_backtest_sim,
         _normalize_backtest_etats,
         _normalize_backtest_filtres,
-        count_simulated_trades,
     )
 
     effective_from = _clamp_date_from(date_from)
@@ -243,10 +269,97 @@ def build_calendar_data(
     finally:
         conn.close()
 
+    kept = [f for f in flashes if _include_flash_in_backtest_sim(f, etats)]
+    return temporal, kept
+
+
+def build_calendar_preview(
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    filtres: list[str] | None = None,
+    btc_ok: bool = BACKTEST_TEMPO_DEFAULT_BTC_OK,
+    btc_reprise: bool = BACKTEST_TEMPO_DEFAULT_BTC_REPRISE,
+    btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE,
+    regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
+    regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON,
+    trend_10: bool = BACKTEST_TEMPO_DEFAULT_TREND_10,
+    trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5,
+    trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0,
+    regime_overrides: dict[tuple[str, str], str] | None = None,
+) -> dict[str, Any]:
+    """Aperçu calendrier : jours actifs / signaux filtrés, sans simulation PnL."""
+    temporal, flashes = _fetch_filtered_calendar_flashes(
+        date_from=date_from,
+        date_to=date_to,
+        filtres=filtres,
+        btc_ok=btc_ok,
+        btc_reprise=btc_reprise,
+        btc_faible=btc_faible,
+        regime_oui=regime_oui,
+        regime_non=regime_non,
+        trend_10=trend_10,
+        trend_5=trend_5,
+        trend_0=trend_0,
+        regime_overrides=regime_overrides,
+    )
+    days = _aggregate_days_preview(flashes)
+    return {
+        "ok": True,
+        "preview": True,
+        "n_signaux": len(flashes),
+        "n_trades": 0,
+        "active_days": len(days),
+        "date_from": temporal.date_debut.isoformat(),
+        "date_to": temporal.date_fin.isoformat(),
+        "regime_overrides_applied": len(regime_overrides or {}),
+        "stats": None,
+        "data": {"days": days},
+    }
+
+
+def build_calendar_data(
+    *,
+    leverage: float,
+    tp: float,
+    sl: float,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    filtres: list[str] | None = None,
+    btc_ok: bool = BACKTEST_TEMPO_DEFAULT_BTC_OK,
+    btc_reprise: bool = BACKTEST_TEMPO_DEFAULT_BTC_REPRISE,
+    btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE,
+    regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
+    regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON,
+    trend_10: bool = BACKTEST_TEMPO_DEFAULT_TREND_10,
+    trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5,
+    trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0,
+    regime_overrides: dict[tuple[str, str], str] | None = None,
+) -> dict[str, Any]:
+    """Simule les flashs filtrés et agrège le calendrier journalier."""
+    from modules.dashboard.routes import (
+        _backtest_row_from_sim,
+        _call_simulate_one,
+        count_simulated_trades,
+    )
+
+    temporal, flashes = _fetch_filtered_calendar_flashes(
+        date_from=date_from,
+        date_to=date_to,
+        filtres=filtres,
+        btc_ok=btc_ok,
+        btc_reprise=btc_reprise,
+        btc_faible=btc_faible,
+        regime_oui=regime_oui,
+        regime_non=regime_non,
+        trend_10=trend_10,
+        trend_5=trend_5,
+        trend_0=trend_0,
+        regime_overrides=regime_overrides,
+    )
+
     sim_rows: list[dict[str, Any]] = []
     for flash in flashes:
-        if not _include_flash_in_backtest_sim(flash, etats):
-            continue
         ts = flash.get("flash_ts")
         if not ts:
             row = _backtest_row_from_sim(flash, None)
@@ -265,8 +378,10 @@ def build_calendar_data(
     stats = _compute_calendar_stats(sim_rows)
     return {
         "ok": True,
+        "preview": False,
         "n_trades": count_simulated_trades(sim_rows),
         "n_signaux": len(sim_rows),
+        "active_days": len(days),
         "date_from": temporal.date_debut.isoformat(),
         "date_to": temporal.date_fin.isoformat(),
         "regime_overrides_applied": len(regime_overrides or {}),

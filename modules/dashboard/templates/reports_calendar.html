@@ -49,9 +49,9 @@
           </div>
         </div>
         <div class="rp-actions">
-          <button type="button" id="rp-apply" class="rp-btn">🔄 Appliquer</button>
+          <button type="button" id="rp-apply" class="rp-btn" title="Simule le PnL Bitunix (TP/SL)">▶ Appliquer</button>
         </div>
-        <span id="rp-status" class="rp-status">Clique « Appliquer » pour charger le calendrier.</span>
+        <span id="rp-status" class="rp-status">Chargement de l'aperçu…</span>
       </div>
       <div class="rp-filters rp-filters--toggles">
         <div class="backtest-filtre" role="group" aria-label="Filtres">
@@ -122,13 +122,14 @@
       <div id="rp-calendar-stats" class="rp-stats" hidden></div>
       <div id="rp-calendar-kpis" class="rp-kpis"></div>
       <div id="rp-calendar" class="rp-calendar">
-        <p class="rp-empty">Sélectionnez les réglages puis cliquez « Appliquer ».</p>
+        <p class="rp-empty">Chargement…</p>
       </div>
       <div class="rp-legend">
+        <span class="rp-legend-item"><span class="rp-swatch rp-swatch--preview"></span> Jour avec signaux (aperçu)</span>
         <span class="rp-legend-item"><span class="rp-swatch rp-swatch--pos"></span> Jour positif</span>
         <span class="rp-legend-item"><span class="rp-swatch rp-swatch--neg"></span> Jour négatif</span>
-        <span class="rp-legend-item"><span class="rp-swatch" style="background:rgba(139,148,158,0.18)"></span> Aucun trade</span>
-        <span class="rp-legend-item rp-legend-hint">Cliquez sur un jour tradé pour voir le détail.</span>
+        <span class="rp-legend-item"><span class="rp-swatch" style="background:rgba(139,148,158,0.18)"></span> Aucun signal</span>
+        <span class="rp-legend-item rp-legend-hint">Cliquez sur un jour pour voir le détail. « Appliquer » lance la simulation PnL.</span>
       </div>
     </section>
   </div>

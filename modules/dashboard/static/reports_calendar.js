@@ -11,6 +11,8 @@
   let dayMap = {};
   let ctxRef = null;
   let modalBound = false;
+  let previewTimer = null;
+  let previewAbort = null;
 
   function byId(id) {
     return document.getElementById(id);
@@ -176,11 +178,8 @@
     };
   }
 
-  function buildQuery(params) {
+  function buildFilterQuery(params) {
     const q = new URLSearchParams();
-    q.set("leverage", String(params.leverage));
-    q.set("tp", String(params.tp));
-    q.set("sl", String(params.sl));
     if (params.date_from) q.set("date_from", params.date_from);
     if (params.date_to) q.set("date_to", params.date_to);
     q.set("btc_ok", params.btc_ok ? "true" : "false");
@@ -193,7 +192,19 @@
     q.set("trend_0", params.trend_0 ? "true" : "false");
     if (window.RegimeSim) RegimeSim.appendToUrlSearchParams(q);
     (params.filtres || []).forEach((f) => q.append("filtres", f));
+    return q;
+  }
+
+  function buildQuery(params) {
+    const q = buildFilterQuery(params);
+    q.set("leverage", String(params.leverage));
+    q.set("tp", String(params.tp));
+    q.set("sl", String(params.sl));
     return q.toString();
+  }
+
+  function buildPreviewQuery(params) {
+    return buildFilterQuery(params).toString();
   }
 
   function setStatus(msg, isError) {
@@ -275,6 +286,8 @@
   }
 
   function renderMonth(year, month, map, ctx, rangeStart, rangeEnd) {
+    const previewMode = !!(ctx && ctx.previewMode);
+    const zeroLabel = previewMode ? "0 signal" : "0 trade";
     const daysInMonth = new Date(year, month, 0).getDate();
     const firstDow = (new Date(year, month - 1, 1).getDay() + 6) % 7;
     let cells = "";
@@ -293,9 +306,17 @@
       } else if (!d && isInRange(key, rangeStart, rangeEnd)) {
         cells +=
           '<div class="rp-cal-cell rp-cal-cell--zero"><span class="rp-cal-daynum">' + day +
-          '</span><span class="rp-cal-meta"><span class="rp-cal-zero-label">0 trade</span></span></div>';
+          '</span><span class="rp-cal-meta"><span class="rp-cal-zero-label">' + zeroLabel + "</span></span></div>";
       } else if (!d) {
         cells += '<div class="rp-cal-cell rp-cal-cell--none"><span class="rp-cal-daynum">' + day + "</span></div>";
+      } else if (previewMode || d.preview) {
+        const countLine = d.n + " signal" + (d.n > 1 ? "s" : "");
+        cells +=
+          '<button type="button" class="rp-cal-cell rp-cal-cell--active rp-cal-cell--preview' +
+          '" data-date="' + esc(key) +
+          '"><span class="rp-cal-daynum">' + day +
+          '</span><span class="rp-cal-meta"><span class="rp-cal-preview-label">' +
+          esc(countLine) + "</span></span></button>";
       } else {
         const dayTotal = d.pnl_total != null ? d.pnl_total : d.pnl;
         const pnlCls = dayTotal >= 0 ? "rp-pos" : "rp-neg";
@@ -327,15 +348,56 @@
     );
   }
 
+  function renderCalendarGrid(container, dayMapLocal, ctx, rangeStart, rangeEnd) {
+    let html = "";
+    let y = Number(rangeStart.slice(0, 4));
+    let m = Number(rangeStart.slice(5, 7));
+    const endY = Number(rangeEnd.slice(0, 4));
+    const endM = Number(rangeEnd.slice(5, 7));
+    while (y < endY || (y === endY && m <= endM)) {
+      html += renderMonth(y, m, dayMapLocal, ctx, rangeStart, rangeEnd);
+      m += 1;
+      if (m > 12) { m = 1; y += 1; }
+    }
+    container.innerHTML = html;
+    container.onclick = function (ev) {
+      const btn = ev.target.closest("[data-date]");
+      if (btn) openDayModal(btn.getAttribute("data-date"));
+    };
+    bindModalOnce();
+  }
+
   function renderCalendar(data, ctx) {
     ctxRef = ctx;
     const days = data.days || [];
-    const stats = ctx.stats || null;
+    const previewMode = !!(ctx.previewMode || data.preview);
+    const stats = previewMode ? null : (ctx.stats || null);
     const container = byId("rp-calendar");
     const kpis = byId("rp-calendar-kpis");
     dayMap = {};
 
     renderStats(stats);
+
+    days.forEach((d) => {
+      dayMap[d.date] = d;
+    });
+
+    const params = ctx.params || {};
+    let rangeStart = params.date_from || MIN_DATE;
+    let rangeEnd = params.date_to || todayISO();
+
+    if (previewMode) {
+      const totalSignaux = ctx.nSignaux != null
+        ? ctx.nSignaux
+        : days.reduce((sum, d) => sum + (d.n || 0), 0);
+      if (kpis) {
+        kpis.innerHTML =
+          kpi("Jours actifs", String(days.length)) +
+          kpi("Signaux", String(totalSignaux));
+      }
+      renderCalendarGrid(container, dayMap, { ...ctx, previewMode: true }, rangeStart, rangeEnd);
+      return;
+    }
 
     if (!days.length) {
       container.innerHTML = '<p class="rp-empty">Aucun trade sur cette période.</p>';
@@ -350,7 +412,6 @@
     let best = days[0];
     let worst = days[0];
     days.forEach((d) => {
-      dayMap[d.date] = d;
       const dayTotal = d.pnl_total != null ? d.pnl_total : d.pnl;
       totalTrades += d.n;
       totalPnlRealise += d.pnl_realise != null ? d.pnl_realise : 0;
@@ -372,29 +433,10 @@
         kpiDay("Pire jour", fmtPct(worstPnl), worst.date, worstPnl);
     }
 
-    const first = days[0].date;
     const last = days[days.length - 1].date;
-    const params = ctx.params || {};
-    let rangeStart = params.date_from || first;
-    let rangeEnd = params.date_to || todayISO();
     if (rangeEnd < last) rangeEnd = last;
 
-    let html = "";
-    let y = Number(rangeStart.slice(0, 4));
-    let m = Number(rangeStart.slice(5, 7));
-    const endY = Number(rangeEnd.slice(0, 4));
-    const endM = Number(rangeEnd.slice(5, 7));
-    while (y < endY || (y === endY && m <= endM)) {
-      html += renderMonth(y, m, dayMap, ctx, rangeStart, rangeEnd);
-      m += 1;
-      if (m > 12) { m = 1; y += 1; }
-    }
-    container.innerHTML = html;
-    container.onclick = function (ev) {
-      const btn = ev.target.closest("[data-date]");
-      if (btn) openDayModal(btn.getAttribute("data-date"));
-    };
-    bindModalOnce();
+    renderCalendarGrid(container, dayMap, { ...ctx, previewMode: false }, rangeStart, rangeEnd);
   }
 
   function trendBadgeHtml(score, badge) {
@@ -423,43 +465,68 @@
     const modal = byId("rp-cal-modal");
     if (!d || !modal || !ctxRef) return;
 
+    const previewMode = !!(ctxRef.previewMode || d.preview);
     byId("rp-cal-modal-title").textContent = formatDateFr(dateKey);
-    const dayTotal = d.pnl_total != null ? d.pnl_total : d.pnl;
-    byId("rp-cal-modal-summary").innerHTML =
-      kpi("Trades", d.n) +
-      kpi("PnL réalisé", fmtPct(d.pnl_realise), d.pnl_realise) +
-      kpi("PnL total", fmtPctProv(dayTotal, d.pnl_total_provisional), dayTotal) +
-      kpi("Win rate", d.win_rate + "%");
 
     const grid = byId("rp-cal-modal-trades");
     const trades = (d.trades || []).slice().sort(function (a, b) {
       return (a.entry_ts || "").localeCompare(b.entry_ts || "");
     });
-    if (!trades.length) {
-      grid.innerHTML = '<p class="rp-empty rp-day-grid__empty">Aucun trade.</p>';
+
+    if (previewMode) {
+      byId("rp-cal-modal-summary").innerHTML = kpi("Signaux", d.n);
+      if (!trades.length) {
+        grid.innerHTML = '<p class="rp-empty rp-day-grid__empty">Aucun signal.</p>';
+      } else {
+        let cells =
+          '<span class="rp-day-grid__head">Token</span>' +
+          '<span class="rp-day-grid__head">Tendance H4</span>' +
+          '<span class="rp-day-grid__head">Heure</span>';
+        trades.forEach((t) => {
+          cells +=
+            '<span class="rp-day-grid__cell rp-day-grid__cell--token">' + esc(t.symbol) + "</span>" +
+            '<span class="rp-day-grid__cell rp-day-grid__cell--trend">' +
+            trendBadgeHtml(t.trend_h4_score, t.trend_h4_badge) +
+            "</span>" +
+            '<span class="rp-day-grid__cell rp-day-grid__cell--range">' +
+            esc(fmtModalTime(t.entry_ts, dateKey)) + "</span>";
+        });
+        grid.innerHTML = cells;
+      }
     } else {
-      let cells =
-        '<span class="rp-day-grid__head">Token</span>' +
-        '<span class="rp-day-grid__head">Tendance H4</span>' +
-        '<span class="rp-day-grid__head">Horaires</span>' +
-        '<span class="rp-day-grid__head">Durée</span>' +
-        '<span class="rp-day-grid__head">PnL</span>' +
-        '<span class="rp-day-grid__head">Exit</span>';
-      trades.forEach((t) => {
-        const range = fmtModalRange(t.entry_ts, t.exit_ts, dateKey);
-        cells +=
-          '<span class="rp-day-grid__cell rp-day-grid__cell--token">' + esc(t.symbol) + "</span>" +
-          '<span class="rp-day-grid__cell rp-day-grid__cell--trend">' +
-          trendBadgeHtml(t.trend_h4_score, t.trend_h4_badge) +
-          "</span>" +
-          '<span class="rp-day-grid__cell rp-day-grid__cell--range">' + esc(range) + "</span>" +
-          '<span class="rp-day-grid__cell rp-day-grid__cell--dur">' + esc(fmtDurationShort(t.duration_min)) + "</span>" +
-          '<span class="rp-day-grid__cell rp-day-grid__cell--pnl ' + pnlClass(t.pnl_pct) + '">' + fmtPct(t.pnl_pct) + "</span>" +
-          '<span class="rp-day-grid__cell rp-day-grid__cell--exit">' +
-          esc(t.exit_reason === "OPEN" && t.pnl_provisional ? "OPEN (prov.)" : t.exit_reason) +
-          "</span>";
-      });
-      grid.innerHTML = cells;
+      const dayTotal = d.pnl_total != null ? d.pnl_total : d.pnl;
+      byId("rp-cal-modal-summary").innerHTML =
+        kpi("Trades", d.n) +
+        kpi("PnL réalisé", fmtPct(d.pnl_realise), d.pnl_realise) +
+        kpi("PnL total", fmtPctProv(dayTotal, d.pnl_total_provisional), dayTotal) +
+        kpi("Win rate", d.win_rate + "%");
+
+      if (!trades.length) {
+        grid.innerHTML = '<p class="rp-empty rp-day-grid__empty">Aucun trade.</p>';
+      } else {
+        let cells =
+          '<span class="rp-day-grid__head">Token</span>' +
+          '<span class="rp-day-grid__head">Tendance H4</span>' +
+          '<span class="rp-day-grid__head">Horaires</span>' +
+          '<span class="rp-day-grid__head">Durée</span>' +
+          '<span class="rp-day-grid__head">PnL</span>' +
+          '<span class="rp-day-grid__head">Exit</span>';
+        trades.forEach((t) => {
+          const range = fmtModalRange(t.entry_ts, t.exit_ts, dateKey);
+          cells +=
+            '<span class="rp-day-grid__cell rp-day-grid__cell--token">' + esc(t.symbol) + "</span>" +
+            '<span class="rp-day-grid__cell rp-day-grid__cell--trend">' +
+            trendBadgeHtml(t.trend_h4_score, t.trend_h4_badge) +
+            "</span>" +
+            '<span class="rp-day-grid__cell rp-day-grid__cell--range">' + esc(range) + "</span>" +
+            '<span class="rp-day-grid__cell rp-day-grid__cell--dur">' + esc(fmtDurationShort(t.duration_min)) + "</span>" +
+            '<span class="rp-day-grid__cell rp-day-grid__cell--pnl ' + pnlClass(t.pnl_pct) + '">' + fmtPct(t.pnl_pct) + "</span>" +
+            '<span class="rp-day-grid__cell rp-day-grid__cell--exit">' +
+            esc(t.exit_reason === "OPEN" && t.pnl_provisional ? "OPEN (prov.)" : t.exit_reason) +
+            "</span>";
+        });
+        grid.innerHTML = cells;
+      }
     }
 
     modal.hidden = false;
@@ -471,6 +538,75 @@
     if (!modal) return;
     modal.hidden = true;
     document.body.style.overflow = "";
+  }
+
+  function schedulePreview() {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(runCalendarPreview, 300);
+  }
+
+  async function runCalendarPreview() {
+    const params = getParams();
+    if (previewAbort) previewAbort.abort();
+    previewAbort = new AbortController();
+    const signal = previewAbort.signal;
+    setStatus("Mise à jour aperçu…");
+    const t0 = Date.now();
+    try {
+      const overrides = window.RegimeSim && RegimeSim.overridesForApi();
+      let dataResp;
+      if (overrides) {
+        const body = {
+          date_from: params.date_from,
+          date_to: params.date_to,
+          filtres: params.filtres,
+          btc_ok: params.btc_ok,
+          btc_reprise: params.btc_reprise,
+          btc_faible: params.btc_faible,
+          regime_oui: params.regime_oui,
+          regime_non: params.regime_non,
+          trend_10: params.trend_10,
+          trend_5: params.trend_5,
+          trend_0: params.trend_0,
+          regime_overrides: overrides,
+        };
+        dataResp = await fetch("/reports/calendar/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+          signal,
+        });
+      } else {
+        const q = buildPreviewQuery(params);
+        dataResp = await fetch("/reports/calendar/preview?" + q, { signal });
+      }
+      const payload = await dataResp.json();
+      if (!dataResp.ok || !payload.ok) {
+        throw new Error(payload.detail || payload.error || "Aperçu indisponible");
+      }
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      const rangeFrom = payload.date_from || params.date_from;
+      const rangeTo = payload.date_to || params.date_to;
+      setStatus(
+        "Aperçu · " + fmtPeriodLabel(rangeFrom, rangeTo) + " · " +
+        (payload.n_signaux || 0) + " signaux · " + secs + "s" +
+        (payload.regime_overrides_applied
+          ? " · " + payload.regime_overrides_applied + " pastille(s) sim."
+          : "") +
+        ' · <span class="rp-status-hint">« Appliquer » pour le PnL</span>'
+      );
+      renderCalendar(payload.data || payload, {
+        params,
+        previewMode: true,
+        nSignaux: payload.n_signaux,
+        stats: null,
+        fmtPct,
+        pnlClass,
+      });
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setStatus(err.message || String(err), true);
+    }
   }
 
   async function runCalendar() {
@@ -500,7 +636,7 @@
       const rangeFrom = payload.date_from || params.date_from;
       const rangeTo = payload.date_to || params.date_to;
       setStatus(
-        fmtPeriodLabel(rangeFrom, rangeTo) + " · " +
+        "Simulation · " + fmtPeriodLabel(rangeFrom, rangeTo) + " · " +
         params.leverage + "× · TP " + params.tp + "% · SL " + params.sl + "% · " +
         (payload.n_trades || 0) + " trades · " + secs + "s" +
         (payload.regime_overrides_applied
@@ -509,6 +645,7 @@
       );
       renderCalendar(payload.data || payload, {
         params,
+        previewMode: false,
         stats: payload.stats || null,
         fmtPct,
         pnlClass,
@@ -524,18 +661,35 @@
     if (window.RegimeSim) RegimeSim.refreshBanner();
   }
 
+  function bindPreviewTriggers() {
+    const filterIds = [
+      "rp-filtre-tous", "rp-filtre-ichimoku", "rp-filtre-btc", "rp-filtre-btc10",
+      "rp-filtre-regime-oui", "rp-filtre-regime-non",
+      "rp-filtre-trend-10", "rp-filtre-trend-5", "rp-filtre-trend-0",
+      "rp-filtre-btc-ok", "rp-filtre-btc-reprise", "rp-filtre-btc-faible",
+      "rp-from", "rp-to",
+    ];
+    filterIds.forEach((id) => {
+      const el = byId(id);
+      if (!el) return;
+      el.addEventListener("change", () => {
+        if (id === "rp-filtre-tous") onFiltreChange("tous");
+        else if (id.startsWith("rp-filtre-")) onFiltreChange(id.replace("rp-filtre-", ""));
+        schedulePreview();
+      });
+    });
+  }
+
   byId("rp-apply").addEventListener("click", runCalendar);
   document.querySelectorAll(".rp-preset").forEach((btn) => {
     btn.addEventListener("click", () => {
       applyPreset(btn.getAttribute("data-preset"));
+      schedulePreview();
     });
   });
 
-  byId("rp-filtre-tous").addEventListener("change", () => onFiltreChange("tous"));
-  byId("rp-filtre-ichimoku").addEventListener("change", () => onFiltreChange("ichimoku"));
-  byId("rp-filtre-btc").addEventListener("change", () => onFiltreChange("btc"));
-  byId("rp-filtre-btc10").addEventListener("change", () => onFiltreChange("btc10"));
-
+  bindPreviewTriggers();
   ensureDefaultDates();
   updateSimBanner();
+  schedulePreview();
 })();
