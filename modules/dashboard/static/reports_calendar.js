@@ -110,8 +110,6 @@
       btc_ok: byId("rp-filtre-btc-ok").checked,
       btc_reprise: byId("rp-filtre-btc-reprise").checked,
       btc_faible: byId("rp-filtre-btc-faible").checked,
-      regime_oui: byId("rp-filtre-regime-oui").checked,
-      regime_non: byId("rp-filtre-regime-non").checked,
       trend_10: byId("rp-filtre-trend-10").checked,
       trend_5: byId("rp-filtre-trend-5").checked,
       trend_0: byId("rp-filtre-trend-0").checked,
@@ -185,12 +183,9 @@
     q.set("btc_ok", params.btc_ok ? "true" : "false");
     q.set("btc_reprise", params.btc_reprise ? "true" : "false");
     q.set("btc_faible", params.btc_faible ? "true" : "false");
-    q.set("regime_oui", params.regime_oui ? "true" : "false");
-    q.set("regime_non", params.regime_non ? "true" : "false");
     q.set("trend_10", params.trend_10 ? "true" : "false");
     q.set("trend_5", params.trend_5 ? "true" : "false");
     q.set("trend_0", params.trend_0 ? "true" : "false");
-    if (window.RegimeSim) RegimeSim.appendToUrlSearchParams(q);
     (params.filtres || []).forEach((f) => q.append("filtres", f));
     return q;
   }
@@ -553,33 +548,8 @@
     setStatus("Mise à jour aperçu…");
     const t0 = Date.now();
     try {
-      const overrides = window.RegimeSim && RegimeSim.overridesForApi();
-      let dataResp;
-      if (overrides) {
-        const body = {
-          date_from: params.date_from,
-          date_to: params.date_to,
-          filtres: params.filtres,
-          btc_ok: params.btc_ok,
-          btc_reprise: params.btc_reprise,
-          btc_faible: params.btc_faible,
-          regime_oui: params.regime_oui,
-          regime_non: params.regime_non,
-          trend_10: params.trend_10,
-          trend_5: params.trend_5,
-          trend_0: params.trend_0,
-          regime_overrides: overrides,
-        };
-        dataResp = await fetch("/reports/calendar/preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify(body),
-          signal,
-        });
-      } else {
-        const q = buildPreviewQuery(params);
-        dataResp = await fetch("/reports/calendar/preview?" + q, { signal });
-      }
+      const q = buildPreviewQuery(params);
+      const dataResp = await fetch("/reports/calendar/preview?" + q, { signal });
       const payload = await dataResp.json();
       if (!dataResp.ok || !payload.ok) {
         throw new Error(payload.detail || payload.error || "Aperçu indisponible");
@@ -590,9 +560,6 @@
       setStatus(
         "Aperçu · " + fmtPeriodLabel(rangeFrom, rangeTo) + " · " +
         (payload.n_signaux || 0) + " signaux · " + secs + "s" +
-        (payload.regime_overrides_applied
-          ? " · " + payload.regime_overrides_applied + " pastille(s) sim."
-          : "") +
         ' · <span class="rp-status-hint">« Appliquer » pour le PnL</span>'
       );
       renderCalendar(payload.data || payload, {
@@ -616,18 +583,8 @@
     const t0 = Date.now();
     setStatus("Calcul simulation Visio Gemini…");
     try {
-      const overrides = window.RegimeSim && RegimeSim.overridesForApi();
-      let dataResp;
-      if (overrides) {
-        dataResp = await fetch("/reports/calendar/data", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ ...params, regime_overrides: overrides }),
-        });
-      } else {
-        const q = buildQuery(params);
-        dataResp = await fetch("/reports/calendar/data?" + q);
-      }
+      const q = buildQuery(params);
+      const dataResp = await fetch("/reports/calendar/data?" + q);
       const payload = await dataResp.json();
       if (!dataResp.ok || !payload.ok) {
         throw new Error(payload.detail || payload.error || "Calendrier indisponible");
@@ -638,10 +595,7 @@
       setStatus(
         "Simulation · " + fmtPeriodLabel(rangeFrom, rangeTo) + " · " +
         params.leverage + "× · TP " + params.tp + "% · SL " + params.sl + "% · " +
-        (payload.n_trades || 0) + " trades · " + secs + "s" +
-        (payload.regime_overrides_applied
-          ? " · " + payload.regime_overrides_applied + " pastille(s) sim."
-          : "")
+        (payload.n_trades || 0) + " trades · " + secs + "s"
       );
       renderCalendar(payload.data || payload, {
         params,
@@ -657,14 +611,9 @@
     }
   }
 
-  function updateSimBanner() {
-    if (window.RegimeSim) RegimeSim.refreshBanner();
-  }
-
   function bindPreviewTriggers() {
     const filterIds = [
       "rp-filtre-tous", "rp-filtre-ichimoku", "rp-filtre-btc", "rp-filtre-btc10",
-      "rp-filtre-regime-oui", "rp-filtre-regime-non",
       "rp-filtre-trend-10", "rp-filtre-trend-5", "rp-filtre-trend-0",
       "rp-filtre-btc-ok", "rp-filtre-btc-reprise", "rp-filtre-btc-faible",
       "rp-from", "rp-to",
@@ -690,6 +639,5 @@
 
   bindPreviewTriggers();
   ensureDefaultDates();
-  updateSimBanner();
   schedulePreview();
 })();

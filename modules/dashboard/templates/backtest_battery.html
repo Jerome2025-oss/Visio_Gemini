@@ -5,16 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Visio Gemini — Batterie Backtest</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/regime_simulation.js" defer></script>
 </head>
 <body>
   <div class="wrap">
     {% set page_title = "Batterie Backtest" %}
-    {% set page_subtitle = "21 scénarios · BTC ON/OFF × voyants · simulation batch bitunix" %}
+    {% set page_subtitle = "Scénarios voyants BTC · simulation batch bitunix" %}
     {% set nav_active = "backtest-battery" %}
     {% include "_dash_nav.html" %}
-
-    <p id="regime-sim-banner" class="regime-sim-banner" hidden></p>
 
     <section class="panel backtest-tempo-panel">
       <h2 class="backtest-tempo-panel__title">Paramètres</h2>
@@ -48,12 +45,12 @@
           <input type="checkbox" id="bat-export-files">
           Exporter CSV/JSON sur disque
         </label>
-        <button type="button" id="bat-run" class="backtest-run-btn">⚡ Lancer la batterie (21 scénarios)</button>
+        <button type="button" id="bat-run" class="backtest-run-btn">⚡ Lancer la batterie</button>
         <span id="bat-spinner" class="funnel-card__meta backtest-spinner" hidden>simulation en cours…</span>
       </div>
       <p class="backtest-tempo-interval" id="bat-interval-label">{{ interval_label }}</p>
       <p class="funnel-card__meta battery-hint">
-        Régime BTC ON/OFF = table <strong>btc_regime_dates</strong> · voyants 🟢/✅/🔴 = état flash · 21 scénarios.
+        Scénarios basés sur les voyants 🟢/✅/🔴 (état BTC des flashs).
       </p>
     </section>
 
@@ -63,12 +60,11 @@
     </section>
 
     <section class="panel" id="bat-results-panel" hidden>
-      <h2>Tableau synthèse — 21 scénarios</h2>
+      <h2>Tableau synthèse — scénarios</h2>
       <div class="backtest-table-wrap">
         <table class="backtest-table battery-table" id="bat-table">
           <thead>
             <tr>
-              <th>Régime</th>
               <th>Voyant</th>
               <th>N</th>
               <th>TP</th>
@@ -82,22 +78,7 @@
       </div>
     </section>
 
-    <section class="panel" id="bat-tp-rates-panel" hidden>
-      <h2>TP raté car BTC réglé sur NON</h2>
-      <p class="funnel-card__meta battery-section-hint">Consigne OFF : tu n’as pas tradé — gains manqués si tu avais pris ces flashs.</p>
-      <div id="bat-tp-rates-details"></div>
-    </section>
-
-    <section class="panel" id="bat-sl-panel" hidden>
-      <h2>SL encaissé si tradé — BTC réglé sur NON</h2>
-      <p class="funnel-card__meta battery-section-hint">Consigne OFF : tu n’as pas tradé — pertes que tu aurais subies si tu avais pris ces flashs.</p>
-      <div id="bat-sl-details"></div>
-    </section>
-
-    <section class="panel" id="bat-synthese-panel" hidden>
-      <h2>Bilan cumulé — règle « ne pas trader en OFF »</h2>
-      <div id="bat-synthese-details"></div>
-    </section>
+    <!-- Sections OFF supprimées (feature retirée). -->
   </div>
 
   <script>
@@ -110,21 +91,13 @@
       return String(val).startsWith("~") ? `${base} pnl-live` : base;
     }
 
-    function regimeRowClass(label) {
-      if (label.startsWith("OUI seul")) return "battery-row--oui";
-      if (label.startsWith("NON seul")) return "battery-row--non";
-      return "";
-    }
-
     function renderBaseline(scenarios) {
-      const ref = scenarios.find(
-        (s) => s.regime_label === "OUI + NON" && s.voyant_label === "Tous voyants"
-      );
+      const ref = scenarios.find((s) => s.voyant_label === "Tous voyants");
       if (!ref) return;
       const st = ref.stats;
       document.getElementById("bat-baseline-stats").innerHTML = `
         <div class="bt-stat-pill">
-          <span class="bt-stat-pill__label">Référence (OUI+NON · tous voyants)</span>
+          <span class="bt-stat-pill__label">Référence (tous voyants)</span>
           <span class="bt-stat-pill__value">${st.trades != null ? st.trades : st.total} trades · ${st.tp} TP · ${st.sl} SL · WR ${st.wr} · PnL ${st.pnl_total}</span>
         </div>`;
     }
@@ -133,11 +106,9 @@
       const tbody = document.getElementById("bat-tbody");
       tbody.innerHTML = scenarios.map((s) => {
         const st = s.stats;
-        const rowCls = regimeRowClass(s.regime_label);
         const pnlCls = pnlClass(st.pnl_total);
         return `
-          <tr class="${rowCls}">
-            <td>${s.regime_label}</td>
+          <tr>
             <td>${s.voyant_label}</td>
             <td>${st.trades != null ? st.trades : st.total}</td>
             <td>${st.tp}</td>
@@ -226,14 +197,8 @@
       }
       renderBaseline(data.scenarios || []);
       renderTable(data.scenarios || []);
-      renderTpRates(data.tp_rates_btc_non || {});
-      renderSlEncaisse(data.sl_encaisse_btc_non || {});
-      renderSynthese(data.regle_off_synthese || {});
       document.getElementById("bat-summary-panel").hidden = false;
       document.getElementById("bat-results-panel").hidden = false;
-      document.getElementById("bat-tp-rates-panel").hidden = false;
-      document.getElementById("bat-sl-panel").hidden = false;
-      document.getElementById("bat-synthese-panel").hidden = false;
     }
 
     document.getElementById("bat-run").addEventListener("click", async () => {
@@ -253,7 +218,6 @@
           sl: parseFloat(document.getElementById("bat-sl").value),
           export_files: document.getElementById("bat-export-files").checked,
         };
-        if (window.RegimeSim) RegimeSim.appendToBody(body);
         const resp = await fetch("/backtest/battery/run", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },

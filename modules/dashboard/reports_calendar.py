@@ -23,7 +23,6 @@ from modules.dashboard.backtest_temporal import (
     _utc_today,
     resolve_temporal_filter,
 )
-from modules.dashboard.btc_regime_filter import normalize_regime_etats
 from modules.dashboard.btc_trend_filter import normalize_trend_scores
 from modules.triggers import db_manager
 
@@ -217,8 +216,6 @@ def _fetch_filtered_calendar_flashes(
     btc_ok: bool = BACKTEST_TEMPO_DEFAULT_BTC_OK,
     btc_reprise: bool = BACKTEST_TEMPO_DEFAULT_BTC_REPRISE,
     btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE,
-    regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
-    regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON,
     trend_10: bool = BACKTEST_TEMPO_DEFAULT_TREND_10,
     trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5,
     trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0,
@@ -239,10 +236,6 @@ def _fetch_filtered_calendar_flashes(
         btc_reprise=btc_reprise,
         btc_faible=btc_faible,
     )
-    regime_etats = normalize_regime_etats(
-        regime_oui=regime_oui,
-        regime_non=regime_non,
-    )
     trend_scores = normalize_trend_scores(
         trend_10=trend_10,
         trend_5=trend_5,
@@ -262,7 +255,6 @@ def _fetch_filtered_calendar_flashes(
             filtres=filtres_norm,
             etats=etats,
             temporal=temporal,
-            regime_etats=regime_etats,
             regime_overrides=regime_overrides,
             trend_scores=trend_scores,
         )
@@ -281,8 +273,6 @@ def build_calendar_preview(
     btc_ok: bool = BACKTEST_TEMPO_DEFAULT_BTC_OK,
     btc_reprise: bool = BACKTEST_TEMPO_DEFAULT_BTC_REPRISE,
     btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE,
-    regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
-    regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON,
     trend_10: bool = BACKTEST_TEMPO_DEFAULT_TREND_10,
     trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5,
     trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0,
@@ -296,8 +286,6 @@ def build_calendar_preview(
         btc_ok=btc_ok,
         btc_reprise=btc_reprise,
         btc_faible=btc_faible,
-        regime_oui=regime_oui,
-        regime_non=regime_non,
         trend_10=trend_10,
         trend_5=trend_5,
         trend_0=trend_0,
@@ -329,8 +317,6 @@ def build_calendar_data(
     btc_ok: bool = BACKTEST_TEMPO_DEFAULT_BTC_OK,
     btc_reprise: bool = BACKTEST_TEMPO_DEFAULT_BTC_REPRISE,
     btc_faible: bool = BACKTEST_TEMPO_DEFAULT_BTC_FAIBLE,
-    regime_oui: bool = BACKTEST_TEMPO_DEFAULT_REGIME_OUI,
-    regime_non: bool = BACKTEST_TEMPO_DEFAULT_REGIME_NON,
     trend_10: bool = BACKTEST_TEMPO_DEFAULT_TREND_10,
     trend_5: bool = BACKTEST_TEMPO_DEFAULT_TREND_5,
     trend_0: bool = BACKTEST_TEMPO_DEFAULT_TREND_0,
@@ -350,8 +336,6 @@ def build_calendar_data(
         btc_ok=btc_ok,
         btc_reprise=btc_reprise,
         btc_faible=btc_faible,
-        regime_oui=regime_oui,
-        regime_non=regime_non,
         trend_10=trend_10,
         trend_5=trend_5,
         trend_0=trend_0,

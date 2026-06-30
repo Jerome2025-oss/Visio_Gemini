@@ -53,7 +53,6 @@ from modules.dashboard.btc_trend_filter import (
 )
 from modules.dashboard.btc_price import get_market_spot
 from modules.triggers import btc_context, db_manager
-from modules.triggers import btc_regime_dates
 
 router = APIRouter()
 
@@ -546,82 +545,6 @@ def btc_trend_data(period: str = "30d") -> JSONResponse:
     return JSONResponse(_btc_trend_payload(period_norm))
 
 
-def _btc_regime_chart_url(chart_path: str | None) -> str:
-    if not chart_path:
-        return ""
-    try:
-        captures = load_app_config().paths.captures
-        rel = Path(chart_path).resolve().relative_to(captures.resolve())
-        return f"/captures/{rel.as_posix()}"
-    except ValueError:
-        return ""
-
-
-def _btc_regime_page_context() -> dict[str, Any]:
-    conn = db_manager.connect()
-    try:
-        rows, meta, fixed_days = btc_regime_dates.fetch_regime_table(conn)
-    finally:
-        conn.close()
-    chart_url = _btc_regime_chart_url(meta.get("chart_path"))
-    return {
-        "rows": rows,
-        "meta": meta,
-        "chart_url": chart_url,
-        "fixed_days": list(fixed_days),
-        "n_oui": sum(1 for r in rows if r.get("etat") == "OUI"),
-        "n_non": sum(1 for r in rows if r.get("etat") == "NON"),
-        "n_limite": sum(1 for r in rows if r.get("etat") == "LIMITE"),
-    }
-
-
-def _btc_regime_run_response(result: dict[str, Any]) -> dict[str, Any]:
-    ctx = _btc_regime_page_context()
-    chart_url = _btc_regime_chart_url(result.get("chart_path")) or ctx.get("chart_url", "")
-    return {**ctx, **result, "chart_url": chart_url}
-
-
-class BtcRegimeRunRequest(BaseModel):
-    days_window: int | None = None
-
-
-@router.post("/btc-dates-onoff/run")
-def btc_dates_onoff_run(body: BtcRegimeRunRequest | None = None) -> JSONResponse:
-    """Relance capture + analyse Gemini et upsert incrémental du tableau."""
-    days_window = btc_regime_dates.resolve_days_window(
-        body.days_window if body else None
-    )
-    result = btc_regime_dates.run_regime_dates_update(days_window=days_window)
-    payload = _btc_regime_run_response(result)
-    if not result.get("ok"):
-        return JSONResponse(payload, status_code=502)
-    return JSONResponse(payload)
-
-
-@router.get("/btc-dates-onoff", response_class=HTMLResponse)
-def btc_dates_onoff_page(request: Request) -> HTMLResponse:
-    """Page Date ON/OFF — régimes macro BTC H4 par plages."""
-    templates = request.app.state.templates
-    ctx = _btc_regime_page_context()
-    return templates.TemplateResponse(
-        request,
-        "btc_dates_onoff.html",
-        {
-            "request": request,
-            **ctx,
-            "days_window_default": btc_regime_dates.DAYS_WINDOW,
-            "days_window_min": btc_regime_dates.MIN_DAYS,
-            "days_window_max": btc_regime_dates.MAX_DAYS,
-        },
-    )
-
-
-@router.get("/btc-dates-onoff/data")
-def btc_dates_onoff_data() -> JSONResponse:
-    """Données JSON du tableau (historique accumulé)."""
-    return JSONResponse(_btc_regime_page_context())
-
-
 def _normalize_backtest_etats(
     *,
     btc_ok: bool = True,
@@ -729,7 +652,10 @@ def _fetch_backtest_flashes(
 ) -> list[dict[str, Any]]:
     """Liste brute des flashs Ichimoku pour le backtest (sans simulation)."""
     btc_context.ensure_btc_columns(conn)
-    regime_lookup = build_regime_lookup(conn, overrides=regime_overrides)
+    # BTC ON/OFF (régime par créneau) a été retiré des backtests.
+    # On conserve les paramètres pour compatibilité API, mais on n'applique plus ce filtre
+    # et on évite de charger la table btc_regime_dates.
+    _ = (regime_etats, regime_overrides)
     trend_timeline = build_trend_score_timeline(conn)
     active_etats = etats if etats is not None else _normalize_backtest_etats()
     rows = conn.execute(
@@ -751,8 +677,6 @@ def _fetch_backtest_flashes(
     flashes: list[dict[str, Any]] = []
     for row in rows:
         flash_ts = row["signal_time_utc"]
-        if not passes_regime_filter(flash_ts, regime_lookup, regime_etats):
-            continue
         if not passes_trend_filter(flash_ts, trend_timeline, trend_scores):
             continue
         btc = btc_context.read_btc_fields_from_row(row)
@@ -770,7 +694,6 @@ def _fetch_backtest_flashes(
                 "decision": row["decision_ia"],
                 "btc_score": btc.get("btc_context_score"),
                 "btc_badge": btc_context.btc_badge_color(btc.get("btc_context_score")),
-                "regime_onoff": regime_etat_for_flash(flash_ts, regime_lookup),
                 "trend_h4_score": trend_h4,
                 "trend_h4_badge": btc_context.btc_badge_color(trend_h4),
                 **flash_btc,
@@ -1598,7 +1521,7 @@ def backtest_battery_page(
     tp: float = 1.4,
     sl: float = 2.0,
 ) -> HTMLResponse:
-    """Batterie de test — matrice BTC ON/OFF × voyants."""
+    """Batterie de test — scénarios voyants BTC."""
     temporal = resolve_temporal_filter(
         date_debut=date_debut,
         date_fin=date_fin,

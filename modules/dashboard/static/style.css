@@ -1579,20 +1579,6 @@ th {
   color: var(--muted);
 }
 
-.regime-sim-banner {
-  margin: 0 0 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #fcd34d;
-}
-
-.regime-sim-banner[hidden] {
-  display: none !important;
-}
-
 .btc-regime-day__counts {
   margin-left: auto;
   font-size: 0.78rem;
